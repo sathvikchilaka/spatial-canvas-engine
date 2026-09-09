@@ -6,6 +6,9 @@ import { attachInput } from '@/engine/input'
 import { redo, undo, useStore } from '@/store/store'
 import { toolHandlers } from '@/tools/adapter'
 import { SelectTool } from '@/tools/selectTool'
+import { applyPageUpdate } from '@/store/merge'
+import type { StreamEvent, StreamSource } from '@/stream/source'
+import { createStreamSource } from '@/stream/sseSource'
 import { WorkerClient } from '@/worker/client'
 import type { SerializedPage } from '@/worker/protocol'
 
@@ -26,6 +29,12 @@ export class Session {
   private readonly tool: SelectTool
   private readonly rectScratch = new Float32Array(4)
   private ingestTimer = 0
+  private stream: StreamSource | null = null
+  private streamQueue: StreamEvent[] = []
+  private drainTimer = 0
+  /** Reported to the UI: pages seen, and edits the shield preserved. */
+  status = { pagesReceived: 0, shielded: 0, connected: false, done: false }
+  private onStatusChange: (() => void) | null = null
 
   constructor(canvas: HTMLCanvasElement, pageCount = 100, seed = 1) {
     this.engine = new CanvasEngine(canvas)
@@ -62,6 +71,49 @@ export class Session {
     this.detachers.push(bindShortcuts())
 
     this.engine.start()
+  }
+
+  /**
+   * Connects the live stream. Events queue and drain a bounded slice per tick
+   * so ingestion never blocks a frame.
+   */
+  async connectStream(onStatusChange?: () => void): Promise<void> {
+    this.onStatusChange = onStatusChange ?? null
+    this.stream = await createStreamSource({
+      pageCount: this.pages.length,
+      seed: 1,
+      onStatus: (connected) => {
+        this.status.connected = connected
+        this.onStatusChange?.()
+      },
+    })
+    this.status.connected = true
+    this.stream.start((e) => {
+      this.streamQueue.push(e)
+      this.scheduleDrain()
+    })
+  }
+
+  private scheduleDrain() {
+    if (this.drainTimer) return
+    this.drainTimer = window.setTimeout(() => {
+      this.drainTimer = 0
+      const budgetEnd = performance.now() + 8
+      while (this.streamQueue.length && performance.now() < budgetEnd) {
+        const e = this.streamQueue.shift()!
+        if (e.type === 'done') {
+          this.status.done = true
+          continue
+        }
+        this.worker.ingestPage({ pageIndex: e.pageIndex, nodes: e.nodes })
+        const r = applyPageUpdate(e.pageIndex, e.nodes)
+        this.status.pagesReceived++
+        this.status.shielded += r.shielded
+      }
+      this.onStatusChange?.()
+      this.engine.requestDraw()
+      if (this.streamQueue.length) this.scheduleDrain()
+    }, 0)
   }
 
   /** Feeds pages to the worker a few per tick so no task exceeds the budget. */
@@ -167,6 +219,12 @@ export class Session {
   }
 
   dispose(): void {
+    this.stream?.stop()
+    this.stream = null
+    this.streamQueue.length = 0
+    if (this.drainTimer) clearTimeout(this.drainTimer)
+    this.drainTimer = 0
+    this.onStatusChange = null
     if (this.ingestTimer) clearTimeout(this.ingestTimer)
     this.ingestTimer = 0
     for (const off of this.detachers) off()

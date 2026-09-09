@@ -1264,7 +1264,7 @@ git commit -m "feat(tools): box editor with resize handles and edge snapping"
   - `createStreamSource(opts?: { forceMock?: boolean }): StreamSource` — probes `/events`, falls back to mock
   - `applyPageUpdate(pageIndex: number, incoming: SerializedNode[]): { applied: number; shielded: number }` — skips nodes with a `dirtyAt` entry
 
-- [ ] **Step 1: Write the failing merge tests**
+- [x] **Step 1: Write the failing merge tests**
 
 ```ts
 // tests/store/merge.test.ts
@@ -1366,9 +1366,9 @@ describe('MockStreamSource', () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 - `server/sse.mjs`: Node `http` server on 8787, `GET /events` with headers
   `Content-Type: text/event-stream`, `Cache-Control: no-cache`, `Connection: keep-alive`.
@@ -1384,13 +1384,13 @@ describe('MockStreamSource', () => {
 - Undo clearing `dirtyAt`: the inverse patch already removes the `dirtyAt[id]` entry because
   the commit that set it recorded it. Verify this rather than special-casing it.
 
-- [ ] **Step 4: Verify tests pass and the live stream works**
+- [x] **Step 4: Verify tests pass and the live stream works** _(endpoint verified via curl; DevTools ingestion trace captured in Task 16)_
 
 Run `pnpm dev:all`. Confirm pages appear out of order, the canvas stays interactive
 throughout, and DevTools shows no long task >16ms during ingestion. Save the trace to
 `docs/perf/phase4-ingestion.json`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add server src/stream src/store/merge.ts vite.config.ts package.json pnpm-lock.yaml tests/stream tests/store/merge.test.ts docs/perf

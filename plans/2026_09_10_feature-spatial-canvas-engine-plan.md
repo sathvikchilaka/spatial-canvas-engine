@@ -570,7 +570,7 @@ git commit -m "feat(data): synthetic page renderer with LRU bitmap cache"
 - Produces:
   - `class QuadTree { constructor(bounds: {x,y,w,h}, maxDepth = 8, bucketSize = 16); insert(id: number, x, y, w, h: number): void; bulkLoad(ids: Uint32Array, coords: Float32Array, count: number): void; queryPoint(x, y: number, out: number[]): number[]; queryRect(x, y, w, h: number, out: number[]): number[]; remove(id: number, x, y, w, h: number): boolean; update(id, ox, oy, ow, oh, nx, ny, nw, nh: number): void; get size(): number; clear(): void }`
 
-- [ ] **Step 1: Write the failing tests, including a brute-force oracle**
+- [x] **Step 1: Write the failing tests, including a brute-force oracle**
 
 ```ts
 // tests/worker/quadtree.test.ts
@@ -679,9 +679,9 @@ describe('QuadTree', () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Implementer notes:
 - Rects can straddle child boundaries. Store an item in a node when it does not fit wholly
@@ -693,9 +693,9 @@ Implementer notes:
   array so the hot path allocates nothing.
 - `size` tracks a counter, not a traversal.
 
-- [ ] **Step 4: Verify tests pass, including the perf assertion**
+- [x] **Step 4: Verify tests pass, including the perf assertion**
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/worker/quadtree.ts tests/worker/quadtree.test.ts

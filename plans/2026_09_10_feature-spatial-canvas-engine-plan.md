@@ -11,6 +11,13 @@
 **Spec:** `docs/superpowers/specs/2026-09-10-spatial-canvas-engine-design.md`
 **Brief:** `docs/ASSIGNMENT.md`
 
+## Commit convention
+
+Commit messages for this plan are plain sequential WIP markers — `WIP1`, `WIP2`, `WIP3`, … —
+one per task step that says "Commit". No conventional-commit prefixes, no body, no
+`Co-Authored-By` trailer. Where a task below shows a `git commit -m "feat(...): ..."`
+example, use the next `WIP<n>` instead.
+
 ## Global Constraints
 
 - **No DOM overlays for boxes.** All 10k boxes render into one `<canvas>` via Canvas2D. A `<div>` per box fails the brief.
@@ -375,7 +382,7 @@ Produces both the box nodes and the page ink instructions from one seed, so boxe
   - `pageOrigin(pageIndex: number): [number, number]` — vertical stack, `y = index * (PAGE_H + PAGE_GAP)`
   - `generateDocument(pageCount: number, seed: number): { nodes: NodeArrays; pages: GeneratedPage[] }`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 // tests/data/generator.test.ts
@@ -434,9 +441,9 @@ describe('generator', () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify failure** → `pnpm test tests/data/generator.test.ts`
+- [x] **Step 2: Run to verify failure** → `pnpm test tests/data/generator.test.ts`
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Implementer notes:
 - **RNG:** mulberry32 seeded with `seed * 73856093 ^ pageIndex * 19349663` so pages are independent but reproducible.
@@ -461,9 +468,9 @@ function mulberry32(a: number) {
   set to the block's index. `order` increments in emission sequence (that IS the reading order).
 - Target ~100 nodes/page so 100 pages ≈ 10,000.
 
-- [ ] **Step 4: Verify tests pass**
+- [x] **Step 4: Verify tests pass**
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/data/generator.ts tests/data/generator.test.ts

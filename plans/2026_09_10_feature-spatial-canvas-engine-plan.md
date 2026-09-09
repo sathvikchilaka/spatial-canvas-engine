@@ -824,7 +824,7 @@ The frame loop cannot await the worker, so the main thread keeps a coarse conser
 - Produces:
   - `class BucketGrid { constructor(cellSize = 512); addPage(pageIndex: number, ids: Uint32Array, coords: Float32Array, indices: Uint32Array): void; query(x, y, w, h: number, out: Uint32Array): number` — writes node **indices** into `out`, returns the count; `clearPage(pageIndex: number): void; clear(): void`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 // tests/engine/bucketGrid.test.ts
@@ -886,9 +886,9 @@ describe('BucketGrid', () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 - `Map<cellKey, number[]>` where `cellKey = cy * 1e6 + cx`. A rect is pushed into every cell
   it overlaps, so results may contain duplicates across cells — dedupe with a `Uint8Array`
@@ -896,9 +896,9 @@ describe('BucketGrid', () => {
 - Track which cells each page touched, so `clearPage` is O(cells touched).
 - Never allocate in `query` — `out` is caller-owned and reused every frame.
 
-- [ ] **Step 4: Verify tests pass**
+- [x] **Step 4: Verify tests pass**
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/engine/bucketGrid.ts tests/engine/bucketGrid.test.ts

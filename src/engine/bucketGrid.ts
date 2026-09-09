@@ -13,7 +13,11 @@ export class BucketGrid {
   private stamps = new Uint32Array(0)
   private generation = 0
 
-  constructor(private readonly cellSize = 512) {}
+  private readonly cellSize: number
+
+  constructor(cellSize = 512) {
+    this.cellSize = cellSize
+  }
 
   private key(cx: number, cy: number) {
     return cy * 1e6 + cx

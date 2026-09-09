@@ -1,5 +1,5 @@
 /// <reference lib="webworker" />
-import { createNodeArrays, pushNode, type NodeArrays, type Rect } from '@/data/nodes'
+import { createNodeArrays, pushNode, type NodeArrays, type NodeType, type Rect } from '@/data/nodes'
 import { QuadTree } from './quadtree'
 import { UNSOLICITED, type Req, type Res, type SerializedPage } from './protocol'
 
@@ -22,7 +22,7 @@ function ingest(page: SerializedPage) {
   for (const n of page.nodes) {
     const i = pushNode(nodes, {
       id: n.id, page: n.page, x: n.x, y: n.y, w: n.w, h: n.h,
-      type: n.type, parent: n.parent, order: n.order,
+      type: n.type as NodeType, parent: n.parent, order: n.order,
     })
     indexById.set(n.id, i)
     tree.insert(n.id, n.x, n.y, n.w, n.h)

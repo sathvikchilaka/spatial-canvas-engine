@@ -3,6 +3,9 @@ import { UNSOLICITED, type PageIngested, type Req, type Res, type SerializedPage
 
 type Pending = { resolve: (v: never) => void; reject: (e: Error) => void }
 
+/** Omit over a union must distribute, or every member loses its own fields. */
+type ReqBody = Req extends infer T ? (T extends Req ? Omit<T, 'id'> : never) : never
+
 /**
  * Main-thread wrapper: typed postMessage with reqId-matched promises, plus a
  * subscription channel for the worker's unsolicited page-ingest events.
@@ -14,7 +17,10 @@ export class WorkerClient {
   private readonly errorSubs = new Set<(e: Error) => void>()
   private disposed = false
 
-  constructor(private readonly worker: Worker) {
+  private readonly worker: Worker
+
+  constructor(worker: Worker) {
+    this.worker = worker
     this.worker.onmessage = (e: MessageEvent<Res>) => this.receive(e.data)
     this.worker.onerror = (e) => {
       const err = new Error((e as ErrorEvent).message || 'worker error')
@@ -68,7 +74,7 @@ export class WorkerClient {
     this.worker.terminate()
   }
 
-  private request(body: Omit<Req, 'id'>): Promise<unknown> {
+  private request(body: ReqBody): Promise<unknown> {
     if (this.disposed) return Promise.reject(new Error('worker disposed'))
     const id = this.nextId++
     return new Promise((resolve, reject) => {

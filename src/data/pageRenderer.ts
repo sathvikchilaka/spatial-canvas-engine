@@ -97,10 +97,13 @@ function defaultRender(page: GeneratedPage): PageBitmap {
 export class PageCache {
   private readonly cache = new Map<number, PageBitmap>()
 
-  constructor(
-    private readonly maxPages: number,
-    private readonly render: PageRenderFn = defaultRender,
-  ) {}
+  private readonly maxPages: number
+  private readonly render: PageRenderFn
+
+  constructor(maxPages: number, render: PageRenderFn = defaultRender) {
+    this.maxPages = maxPages
+    this.render = render
+  }
 
   get size(): number {
     return this.cache.size

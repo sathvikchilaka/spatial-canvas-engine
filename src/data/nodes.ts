@@ -1,13 +1,15 @@
 /** Shared geometry type, in world units. */
 export type Rect = { x: number; y: number; w: number; h: number }
 
-export enum NodeType {
-  Paragraph = 0,
-  Line = 1,
-  Cell = 2,
-  KeyValue = 3,
-  Figure = 4,
-}
+export const NodeType = {
+  Paragraph: 0,
+  Line: 1,
+  Cell: 2,
+  KeyValue: 3,
+  Figure: 4,
+} as const
+
+export type NodeType = (typeof NodeType)[keyof typeof NodeType]
 
 export const FLAG_DIRTY = 1
 export const FLAG_SELECTED = 2

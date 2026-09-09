@@ -13,24 +13,33 @@ class QTNode {
   rects: number[] = []
   children: QTNode[] | null = null
 
-  constructor(
-    readonly x: number,
-    readonly y: number,
-    readonly w: number,
-    readonly h: number,
-    readonly depth: number,
-  ) {}
+  readonly x: number
+  readonly y: number
+  readonly w: number
+  readonly h: number
+  readonly depth: number
+
+  constructor(x: number, y: number, w: number, h: number, depth: number) {
+    this.x = x
+    this.y = y
+    this.w = w
+    this.h = h
+    this.depth = depth
+  }
 }
 
 export class QuadTree {
   private root: QTNode
   private count = 0
 
-  constructor(
-    private readonly bounds: Bounds,
-    private readonly maxDepth = 8,
-    private readonly bucketSize = 16,
-  ) {
+  private readonly bounds: Bounds
+  private readonly maxDepth: number
+  private readonly bucketSize: number
+
+  constructor(bounds: Bounds, maxDepth = 8, bucketSize = 16) {
+    this.bounds = bounds
+    this.maxDepth = maxDepth
+    this.bucketSize = bucketSize
     this.root = new QTNode(bounds.x, bounds.y, bounds.w, bounds.h, 0)
   }
 

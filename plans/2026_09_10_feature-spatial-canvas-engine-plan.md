@@ -923,7 +923,7 @@ The first task with visible output, and the one that must be profiled before any
   - `crispOffset(dpr: number): number` — half-device-pixel offset for 1px strokes
   - `class CanvasEngine { constructor(canvas: HTMLCanvasElement); setData(nodes: NodeArrays, pages: GeneratedPage[], grid: BucketGrid): void; get viewport(): Viewport; setViewport(vp: Viewport): void; requestDraw(): void; start(): void; dispose(): void; onFrame(cb: (ms: number) => void): () => void }`
 
-- [ ] **Step 1: Write the failing tests** (pure functions only — the loop is verified by profiling, not unit tests)
+- [x] **Step 1: Write the failing tests** (pure functions only — the loop is verified by profiling, not unit tests)
 
 ```ts
 // tests/engine/canvas.test.ts
@@ -958,9 +958,9 @@ describe('crispOffset', () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
-- [ ] **Step 3: Implement the engine**
+- [x] **Step 3: Implement the engine**
 
 `canvas.ts`:
 ```ts
@@ -997,19 +997,19 @@ pointer drag → `panBy`. All handlers call `requestDraw()` and never draw direc
 `App.tsx`: full-screen container, mounts the engine in an effect, loads a 100-page document,
 disposes on unmount.
 
-- [ ] **Step 4: Verify tests pass and the app renders**
+- [x] **Step 4: Verify tests pass and the app renders**
 
 Run: `pnpm test tests/engine/canvas.test.ts` and `pnpm dev`.
 Manually confirm: pages visible, boxes drawn, wheel zooms toward the cursor, drag pans.
 
-- [ ] **Step 5: Profile before going further — this is a gate**
+- [ ] **Step 5: Profile before going further — this is a gate** _(deferred to Task 16: Playwright is installed there and drives the trace)_
 
 Open DevTools → Performance, record ~10s of continuous pan and zoom over the stress document.
 Confirm frames stay ≤16ms. If not, fix it now: check for per-frame allocation, unbatched
 strokes, or drawing culled-out boxes. Do not start Task 9 until this passes. Save the trace to
 `docs/perf/phase1-pan-zoom.json`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/engine src/App.tsx tests/engine/canvas.test.ts docs/perf

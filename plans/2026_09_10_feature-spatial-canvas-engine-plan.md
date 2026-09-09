@@ -1489,7 +1489,7 @@ git commit -m "feat(ui): virtualized tree view with bi-directional canvas ground
   - `relink(order: Uint32Array, fromId: number, toId: number): Uint32Array` — makes `toId` the successor of `fromId`, renumbering the rest without duplicates or gaps
   - `arrowPath(a: Rect, b: Rect): { x1, y1, x2, y2, headAngle: number }` — centre-to-centre, clipped to rect edges
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 // tests/tools/orderTool.test.ts
@@ -1536,9 +1536,9 @@ describe('arrowPath', () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 - Overlay draws arrows **only between visible nodes** — culled like everything else, otherwise
   10k arrows destroy the frame budget. Cap at ~300 arrows on screen; beyond that draw only the
@@ -1546,9 +1546,9 @@ describe('arrowPath', () => {
 - Drag: grab the arrowhead near a node, drag to another box, drop → one `commit('relink', …)`.
 - Sequence numbers drawn as small badges at each box's top-left, only above ~0.6 zoom.
 
-- [ ] **Step 4: Verify tests pass and the interaction works**
+- [x] **Step 4: Verify tests pass and the interaction works**
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/tools/orderTool.ts src/engine/layers/overlays.ts src/components tests/tools/orderTool.test.ts

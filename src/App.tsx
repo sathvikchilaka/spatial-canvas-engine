@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react"
 
 import { Session } from "@/app/session"
 import { StatusBar } from "@/components/StatusBar"
+import { Toolbar, type ToolName } from "@/components/Toolbar"
 import { TreeView } from "@/components/TreeView"
 import { Button } from "@/components/ui/button"
 import type { NodeArrays } from "@/data/nodes"
@@ -18,6 +19,7 @@ export function App() {
     connected: false,
     done: false,
   })
+  const [tool, setTool] = useState<ToolName>("select")
   const selectedId = useStore((s) => s.selectedId)
 
   useEffect(() => {
@@ -59,6 +61,13 @@ export function App() {
           {selectedId === null ? "no selection" : `node #${selectedId}`}
         </span>
         <div className="ml-auto flex items-center gap-2">
+          <Toolbar
+            active={tool}
+            onChange={(t) => {
+              setTool(t)
+              sessionRef.current?.setTool(t)
+            }}
+          />
           <Button size="sm" variant="outline" disabled={!canUndo()} onClick={() => undo()}>
             Undo
           </Button>

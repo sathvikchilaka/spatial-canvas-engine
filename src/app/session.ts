@@ -6,7 +6,10 @@ import { attachInput } from '@/engine/input'
 import { screenToWorld } from '@/engine/viewport'
 import { redo, undo, useStore } from '@/store/store'
 import { toolHandlers } from '@/tools/adapter'
+import { OrderTool, orderedIds } from '@/tools/orderTool'
 import { SelectTool } from '@/tools/selectTool'
+import { OrderOverlay } from '@/engine/layers/overlays'
+import type { Tool } from '@/tools/types'
 import { applyPageUpdate } from '@/store/merge'
 import type { StreamEvent, StreamSource } from '@/stream/source'
 import { createStreamSource } from '@/stream/sseSource'
@@ -27,7 +30,12 @@ export class Session {
   pages: GeneratedPage[]
 
   private readonly detachers: (() => void)[] = []
-  private readonly tool: SelectTool
+  private readonly selectTool: SelectTool
+  private readonly orderTool: OrderTool
+  private readonly orderOverlay = new OrderOverlay()
+  private tool: Tool
+  private toolName: 'select' | 'order' = 'select'
+  private orderDirty = true
   private readonly rectScratch = new Float32Array(4)
   private ingestTimer = 0
   private stream: StreamSource | null = null
@@ -57,19 +65,35 @@ export class Session {
     this.grid.addPage(0, this.nodes.ids, this.nodes.coords, indices)
     this.engine.setData(this.nodes, this.pages, this.grid)
 
-    this.tool = new SelectTool({
+    this.selectTool = new SelectTool({
       getRect: (id) => this.rectOf(id),
       pick: (x, y) => this.worker.hitTest(x, y),
       nearby: (rect, pad, out, excludeId) => this.nearby(rect, pad, out, excludeId),
       requestDraw: () => this.engine.requestDraw(),
       onCommit: (id, from, to) => void this.worker.updateNode(id, from, to),
     })
+    this.orderTool = new OrderTool({
+      getRect: (id) => this.rectOf(id),
+      pick: (x, y) => this.worker.hitTest(x, y),
+      requestDraw: () => this.engine.requestDraw(),
+    })
+    this.tool = this.selectTool
 
+    this.detachers.push(this.engine.addOverlay((ctx, vp) => this.drawOrder(ctx, vp.scale)))
     this.detachers.push(this.engine.addOverlay((ctx, vp) => this.drawHover(ctx, vp.scale)))
     this.detachers.push(this.engine.addOverlay((ctx, vp) => this.tool.drawHud(ctx, vp)))
     this.detachers.push(this.trackHover(canvas))
-    const handlers = toolHandlers(this.tool, this.engine)
-    this.detachers.push(attachInput(this.engine, canvas, () => handlers))
+    const handlerCache = new Map<Tool, ReturnType<typeof toolHandlers>>()
+    this.detachers.push(
+      attachInput(this.engine, canvas, () => {
+        let h = handlerCache.get(this.tool)
+        if (!h) {
+          h = toolHandlers(this.tool, this.engine)
+          handlerCache.set(this.tool, h)
+        }
+        return h
+      }),
+    )
     this.detachers.push(this.subscribeSelection())
     this.detachers.push(bindShortcuts())
 
@@ -133,6 +157,39 @@ export class Session {
 
   get activeTool() {
     return this.tool
+  }
+
+  setTool(name: 'select' | 'order'): void {
+    this.toolName = name
+    this.tool = name === 'order' ? this.orderTool : this.selectTool
+    this.showOrder = name === 'order'
+    this.engine.requestDraw()
+  }
+
+  get currentTool(): 'select' | 'order' {
+    return this.toolName
+  }
+
+  showOrder = false
+
+  /** Reading-order arrows, rebuilt lazily — the sequence changes rarely. */
+  private drawOrder(ctx: CanvasRenderingContext2D, scale: number) {
+    if (!this.showOrder) return
+    if (this.orderDirty) {
+      this.orderOverlay.setSequence(
+        this.nodes,
+        orderedIds(this.nodes, useStore.getState().edits),
+        (id) => indexOfId(this.nodes, id),
+      )
+      this.orderDirty = false
+    }
+    const sel = useStore.getState().selectedId
+    const { indices, count } = this.engine.lastVisible
+    this.orderOverlay.draw(
+      ctx, this.nodes, indices, count, scale,
+      sel === null ? -1 : indexOfId(this.nodes, sel),
+      (id) => indexOfId(this.nodes, id),
+    )
   }
 
   /** Tree → canvas: outline whatever the store says is hovered. */
@@ -251,6 +308,7 @@ export class Session {
         if (di >= 0) this.nodes.flags[di] |= FLAG_DIRTY
       }
       this.applyEdits(state.edits)
+      this.orderDirty = true
       this.engine.requestDraw()
     })
   }

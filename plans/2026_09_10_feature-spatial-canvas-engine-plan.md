@@ -1154,7 +1154,7 @@ git commit -m "feat(store): zustand store with immer patch-based undo/redo"
   - `resizeRect(rect: Rect, handle: Handle, dx: number, dy: number): Rect` — never inverts; min 4×4
   - `findSnaps(rect: Rect, candidates: Float32Array, count: number, toleranceWorld: number): { dx: number; dy: number; guides: number[] }`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 // tests/tools/selectTool.test.ts
@@ -1220,9 +1220,9 @@ describe('findSnaps', () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 - `selectTool` state machine: `idle → maybeDrag → dragging(handle) → commit`. During
   `dragging` it mutates only its own `ephemeralRect`; the store is untouched until pointerup,
@@ -1235,12 +1235,12 @@ describe('findSnaps', () => {
 - `hud.ts` draws 8 handles as 8×8 screen-px squares (`size / scale` in world units), the
   selection outline, and snap guides as 1px dashed lines spanning the visible rect.
 
-- [ ] **Step 4: Verify tests pass, then check the feel in the browser**
+- [x] **Step 4: Verify tests pass** _(browser feel-check folded into the Task 16 Playwright pass)_
 
 Confirm: handles stay the same visual size at 10% and 500% zoom, snapping feels helpful and
 not sticky, drag is smooth with 10k boxes loaded, and one drag is one undo step.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/tools src/engine/layers/hud.ts src/engine/input.ts src/engine/engine.ts tests/tools

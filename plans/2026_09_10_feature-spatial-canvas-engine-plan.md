@@ -719,7 +719,7 @@ git commit -m "feat(worker): quadtree spatial index verified against brute force
   - `type Res = { id: number } & ({ kind: 'ready' } | { kind: 'pageIngested'; pageIndex: number; ids: Uint32Array; coords: Float32Array; types: Uint8Array; parents: Int32Array; order: Int32Array } | { kind: 'hit'; nodeId: number | null } | { kind: 'rect'; ids: Uint32Array } | { kind: 'ok' } | { kind: 'error'; message: string })`
   - `class WorkerClient { constructor(worker: Worker); init(bounds): Promise<void>; hitTest(x, y): Promise<number | null>; queryRect(r): Promise<Uint32Array>; updateNode(...): Promise<void>; onPageIngested(cb: (p: PageIngested) => void): () => void; ingestPage(page): void; reset(): Promise<void>; dispose(): void }`
 
-- [ ] **Step 1: Write the failing tests** — drive `WorkerClient` against a fake worker so no real thread is needed.
+- [x] **Step 1: Write the failing tests** — drive `WorkerClient` against a fake worker so no real thread is needed.
 
 ```ts
 // tests/worker/client.test.ts
@@ -787,9 +787,9 @@ describe('WorkerClient', () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 - `client.ts`: monotonic `reqId`, `Map<number, {resolve, reject}>`, unsolicited messages
   (`id === -1`) fan out to subscribers. `dispose()` rejects every pending entry then
@@ -800,9 +800,9 @@ describe('WorkerClient', () => {
   (smallest area wins, ties broken by higher `order`).
 - Vite worker import: `new Worker(new URL('./index.worker.ts', import.meta.url), { type: 'module' })`.
 
-- [ ] **Step 4: Verify tests pass**
+- [x] **Step 4: Verify tests pass**
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/worker tests/worker/client.test.ts

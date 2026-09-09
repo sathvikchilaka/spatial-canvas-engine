@@ -1412,7 +1412,7 @@ git commit -m "feat(stream): SSE ingestion with dirty-node shielded merge"
   - `buildTreeRows(nodes: NodeArrays, expanded: Set<number>): TreeRow[]` where `TreeRow = { id: number; depth: number; type: NodeType; label: string; hasChildren: boolean }`
   - `TreeView` — virtualized list, only visible rows in the DOM
 
-- [ ] **Step 1: Write the failing tests** (the flattening model is the testable part; rendering is not)
+- [x] **Step 1: Write the failing tests** (the flattening model is the testable part; rendering is not)
 
 ```ts
 // tests/components/treeModel.test.ts
@@ -1451,9 +1451,9 @@ describe('buildTreeRows', () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 - Virtualize by hand: fixed 24px rows, render `Math.ceil(height / 24) + 6` rows from a scroll
   offset. No library needed and 10k rows of DOM would defeat the point of the canvas.
@@ -1464,9 +1464,9 @@ describe('buildTreeRows', () => {
   re-renders on every stream write.
 - Add shadcn primitives as needed: `pnpm dlx shadcn@latest add scroll-area separator badge button tooltip`.
 
-- [ ] **Step 4: Verify tests pass and both directions work in the browser**
+- [x] **Step 4: Verify tests pass and both directions work in the browser**
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/components src/App.tsx tests/components

@@ -3,6 +3,7 @@ import { FLAG_DIRTY, FLAG_SELECTED, indexOfId, type NodeArrays, type Rect } from
 import { BucketGrid } from '@/engine/bucketGrid'
 import { CanvasEngine } from '@/engine/engine'
 import { attachInput } from '@/engine/input'
+import { screenToWorld } from '@/engine/viewport'
 import { redo, undo, useStore } from '@/store/store'
 import { toolHandlers } from '@/tools/adapter'
 import { SelectTool } from '@/tools/selectTool'
@@ -64,7 +65,9 @@ export class Session {
       onCommit: (id, from, to) => void this.worker.updateNode(id, from, to),
     })
 
+    this.detachers.push(this.engine.addOverlay((ctx, vp) => this.drawHover(ctx, vp.scale)))
     this.detachers.push(this.engine.addOverlay((ctx, vp) => this.tool.drawHud(ctx, vp)))
+    this.detachers.push(this.trackHover(canvas))
     const handlers = toolHandlers(this.tool, this.engine)
     this.detachers.push(attachInput(this.engine, canvas, () => handlers))
     this.detachers.push(this.subscribeSelection())
@@ -130,6 +133,56 @@ export class Session {
 
   get activeTool() {
     return this.tool
+  }
+
+  /** Tree → canvas: outline whatever the store says is hovered. */
+  private drawHover(ctx: CanvasRenderingContext2D, scale: number) {
+    const id = useStore.getState().hoveredId
+    if (id === null || id === useStore.getState().selectedId) return
+    const r = this.rectOf(id)
+    if (!r) return
+    ctx.save()
+    ctx.lineWidth = 2 / scale
+    ctx.strokeStyle = 'rgba(120, 200, 255, 0.9)'
+    ctx.strokeRect(r.x, r.y, r.w, r.h)
+    ctx.restore()
+  }
+
+  /** Canvas → tree: hover picks are worker-side, coalesced to one per frame. */
+  private trackHover(canvas: HTMLCanvasElement): () => void {
+    let pending = false
+    let lastX = 0
+    let lastY = 0
+    const onMove = (e: PointerEvent) => {
+      const rect = canvas.getBoundingClientRect()
+      lastX = e.clientX - rect.left
+      lastY = e.clientY - rect.top
+      if (pending) return
+      pending = true
+      requestAnimationFrame(() => {
+        pending = false
+        const [wx, wy] = screenToWorld(this.engine.viewport, lastX, lastY)
+        void this.worker.hitTest(wx, wy).then((id) => {
+          if (useStore.getState().hoveredId !== id) useStore.setState({ hoveredId: id })
+        })
+      })
+    }
+    canvas.addEventListener('pointermove', onMove)
+    return () => canvas.removeEventListener('pointermove', onMove)
+  }
+
+  /** Centres the viewport on a node — the tree's click target. */
+  focusNode(id: number): void {
+    const r = this.rectOf(id)
+    if (!r) return
+    const { w, h } = this.engine.size
+    const vp = this.engine.viewport
+    const scale = Math.min(2, Math.max(vp.scale, 0.6))
+    this.engine.setViewport({
+      scale,
+      tx: w / 2 - (r.x + r.w / 2) * scale,
+      ty: h / 2 - (r.y + r.h / 2) * scale,
+    })
   }
 
   /** Live geometry: the human edit if there is one, else the extracted box. */

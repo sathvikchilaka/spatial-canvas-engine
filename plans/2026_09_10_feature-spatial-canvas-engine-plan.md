@@ -92,7 +92,7 @@ Pure functions, no DOM. This is the foundation everything else builds on and the
   - `visibleWorldRect(vp: Viewport, cssW: number, cssH: number): { x, y, w, h }`
   - `MIN_SCALE = 0.1`, `MAX_SCALE = 5`
 
-- [ ] **Step 1: Install test tooling**
+- [x] **Step 1: Install test tooling**
 
 ```bash
 pnpm add -D vitest @vitest/coverage-v8 jsdom
@@ -112,7 +112,7 @@ export default defineConfig({
 })
 ```
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 ```ts
 // tests/engine/viewport.test.ts
@@ -187,12 +187,12 @@ describe('visibleWorldRect', () => {
 })
 ```
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [x] **Step 3: Run tests to verify they fail**
 
 Run: `pnpm test tests/engine/viewport.test.ts`
 Expected: FAIL — cannot resolve `@/engine/viewport`.
 
-- [ ] **Step 4: Implement**
+- [x] **Step 4: Implement**
 
 ```ts
 // src/engine/viewport.ts
@@ -236,12 +236,12 @@ export function visibleWorldRect(vp: Viewport, cssW: number, cssH: number) {
 }
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `pnpm test tests/engine/viewport.test.ts`
 Expected: PASS, all cases.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add vitest.config.ts package.json pnpm-lock.yaml src/engine/viewport.ts tests/engine/viewport.test.ts
@@ -271,7 +271,7 @@ The representation that makes the worker boundary cheap and the draw loop alloca
   - `indexOfId(a: NodeArrays, id: number): number`
   - `transferables(a: NodeArrays): ArrayBuffer[]`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 // tests/data/nodes.test.ts
@@ -333,11 +333,11 @@ describe('NodeArrays', () => {
 })
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `pnpm test tests/data/nodes.test.ts` → FAIL, module not found.
 
-- [ ] **Step 3: Implement `src/data/nodes.ts`**
+- [x] **Step 3: Implement `src/data/nodes.ts`**
 
 Implement exactly the interface above. Notes for the implementer:
 - `coords` holds 4 floats per node at offset `i * 4`.
@@ -345,9 +345,9 @@ Implement exactly the interface above. Notes for the implementer:
 - `indexOfId` uses a lazily built `Map<number, number>` cached on the container and invalidated on push; a linear scan over 10k on every click would blow the 2ms budget.
 - `transferables` returns the `.buffer` of every typed array, for `postMessage`'s transfer list.
 
-- [ ] **Step 4: Run tests to verify they pass** → `pnpm test tests/data/nodes.test.ts`
+- [x] **Step 4: Run tests to verify they pass** → `pnpm test tests/data/nodes.test.ts`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/data/nodes.ts tests/data/nodes.test.ts

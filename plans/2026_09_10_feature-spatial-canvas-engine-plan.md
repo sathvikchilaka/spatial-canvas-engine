@@ -1002,7 +1002,7 @@ disposes on unmount.
 Run: `pnpm test tests/engine/canvas.test.ts` and `pnpm dev`.
 Manually confirm: pages visible, boxes drawn, wheel zooms toward the cursor, drag pans.
 
-- [ ] **Step 5: Profile before going further — this is a gate** _(deferred to Task 16: Playwright is installed there and drives the trace)_
+- [x] **Step 5: Profile before going further — this is a gate** _(deferred to Task 16: Playwright is installed there and drives the trace)_
 
 Open DevTools → Performance, record ~10s of continuous pan and zoom over the stress document.
 Confirm frames stay ≤16ms. If not, fix it now: check for per-frame allocation, unbatched
@@ -1036,13 +1036,13 @@ git commit -m "feat(engine): DPR-correct canvas, rAF loop, culled batched box re
   - `beginCoalesce(key: string)` / `endCoalesce()` — merge rapid same-key edits within 300ms
   - `HISTORY_LIMIT = 100`
 
-- [ ] **Step 1: Install deps**
+- [x] **Step 1: Install deps**
 
 ```bash
 pnpm add zustand immer
 ```
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 ```ts
 // tests/store/history.test.ts
@@ -1114,9 +1114,9 @@ describe('history', () => {
 })
 ```
 
-- [ ] **Step 3: Run to verify failure**
+- [x] **Step 3: Run to verify failure**
 
-- [ ] **Step 4: Implement**
+- [x] **Step 4: Implement**
 
 - `enablePatches()` from Immer at module load.
 - `commit` runs `produceWithPatches`, pushes `{ name, patches, inverse, at }` onto the undo
@@ -1126,9 +1126,9 @@ describe('history', () => {
 - Ring buffer of `HISTORY_LIMIT`; dropping the oldest entry must not disturb indices — use a
   plain array with `shift()` at the cap (100 entries; the cost is irrelevant at this rate).
 
-- [ ] **Step 5: Verify tests pass**
+- [x] **Step 5: Verify tests pass**
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/store tests/store package.json pnpm-lock.yaml

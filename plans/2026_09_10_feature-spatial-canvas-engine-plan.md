@@ -493,7 +493,7 @@ Draws a generated page's ink to an offscreen canvas, with an LRU bitmap cache so
   - `class PageCache { constructor(maxPages: number); get(page: GeneratedPage): ImageBitmap | OffscreenCanvas | null; ensure(page: GeneratedPage): void; evictOutside(from: number, to: number): void; get size(): number; dispose(): void }`
   - `drawPageInk(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, page: GeneratedPage): void`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Test the cache policy, not the pixels (pixel output isn't meaningfully assertable and jsdom has no canvas). Use a fake renderer injected into `PageCache` so tests stay environment-free.
 
@@ -535,9 +535,9 @@ describe('PageCache', () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 - `PageCache(maxPages, renderFn = defaultRender)` — second param injectable for tests.
 - `Map<number, Bitmap>` in insertion order = LRU; `ensure` deletes+reinserts on hit.
@@ -548,9 +548,9 @@ describe('PageCache', () => {
 - `dispose()` calls `.close()` on any `ImageBitmap` before clearing — this is the leak the
   memory benchmark looks for.
 
-- [ ] **Step 4: Verify tests pass**
+- [x] **Step 4: Verify tests pass**
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/data/pageRenderer.ts tests/data/pageRenderer.test.ts

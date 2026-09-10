@@ -165,6 +165,8 @@ export class TableTool implements Tool {
    */
   onKeyDown(e: KeyboardEvent): void {
     if (e.metaKey || e.ctrlKey || e.altKey) return
+    const t = e.target as HTMLElement | null
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
     const mesh = this.meshState
     const sel = useStore.getState().selectedId
     if (!mesh || sel === null) return

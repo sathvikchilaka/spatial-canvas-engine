@@ -169,6 +169,47 @@ path calls `hasEdge` per frame or per box; the overlay draws from the materializ
 map, and `hasEdge` is reserved for one-off membership checks (e.g. edit validation), not the draw
 loop.
 
+## 5b. Table grid mesh
+
+A table is not a node type — it is a parent block whose children are `NodeType.Cell` nodes
+(`Session.tableAt`). The mesh is **derived, never stored**: `buildMesh` (`src/tools/tableMesh.ts`)
+clusters cell extents into occupancy bands (`bandsOf`) and places one divider line between
+adjacent bands, so inset extraction geometry yields `M+1` lines rather than `2M` cell edges.
+Band derivation is structural, not width-based: a cell that spans two bands is told apart from a
+genuinely wide cell by removing its extent and checking whether that reveals an interior gap
+(`splitInterval`), using only a relative epsilon for extraction slop — never a width heuristic.
+`MIN_BAND = 8` is unrelated to this derivation; it is purely the clamp on how far a divider drag
+may shrink a band. `cellRect` re-derives every cell's rect from the current lines on every read,
+which is what makes post-edit bbox recalculation a one-liner with no second bookkeeping copy —
+and, on the session side, is what makes `tableAt` skipping `FLAG_HIDDEN` cells self-healing after
+a commit: the next mesh rebuild simply never sees a merged-away or undone cell.
+
+Building a mesh is deliberately lossy — it regularises a ragged table onto a shared grid, which
+is the repair the reviewer picked the tool up to make. `TableTool.adopt` therefore takes the
+mesh's own rects as the diff baseline, so adopting a table alone commits nothing.
+
+Dragging a divider commits **ordinary `edits[id].rect` entries**, one `commit()` per gesture.
+Split and merge change the *number* of cells, which a rect diff cannot express, so those two
+gestures additionally set `Edit.created` (an id from `Session.allocId()`, offset at
+`1_000_000_000 + counter` so a synthetic id can never collide with an ingested one) or
+`Edit.deleted`. Both still land in a single `commit()`, so a drag, a split and a merge are each
+exactly one undo entry.
+
+`Session.materializeStructural` applies `created`/`deleted`. Node rows only ever grow — indices
+are referenced by the main-thread `BucketGrid` (512px hash, per-frame culling) and the worker's
+loose-parent QuadTree (`indexById`) — so undoing a creation **hides and de-indexes** the row
+(`FLAG_HIDDEN`, `BucketGrid.remove`, worker `removeNode`) rather than splicing it out, and redoing
+one un-hides and re-indexes it (`showNode`, `worker.insertNode`) rather than pushing a new row.
+`hideNode`/`showNode` are idempotent on the flag, and both reconciliation passes in
+`materializeStructural` key off `FLAG_HIDDEN` rather than a separate mirror — that is what stops a
+created-then-deleted cell from resurrecting on redo and from double-inserting into the QuadTree.
+`nodes.coords` itself has a single writer, `Session.writeCoords`, which is what keeps that array,
+the `BucketGrid`, and the worker's QuadTree from drifting apart across split/merge/undo/redo —
+the same seam a plain drag-and-commit rect edit goes through.
+
+Tables exist only in the synthetic stress document; FUNSD has none, so every table-tool path
+(`tableAt` returns `null`, `onKeyDown` finds no mesh) no-ops rather than throwing.
+
 ## 6. Memory management & frame-rate optimization
 
 - **`PageCache`** (`src/data/pageRenderer.ts`): an LRU of rendered page rasters keyed by page
@@ -220,3 +261,7 @@ design gap.
 - FUNSD's non-commercial license means this workspace cannot ship the corpus in a commercial
   build; `dataset/` stays gitignored and only the prepared `public/funsd/` assets are committed,
   per the terms noted in §0.
+- The table mesh (§5b) regularises a table onto a shared grid, so a genuinely irregular table
+  (per-row column counts not expressible as spans) is snapped rather than preserved. Spans cover
+  the common merged-header case; a fully free-form cell soup would need a per-row divider list,
+  which the brief's "grid mesh" framing does not ask for.

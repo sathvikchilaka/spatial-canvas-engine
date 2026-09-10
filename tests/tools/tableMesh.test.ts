@@ -444,9 +444,17 @@ describe("mergeCells", () => {
   })
 
   it("merges vertically too", () => {
-    const m1 = mergeCells(buildMesh(insetGrid(2, 2)), 1, 3)
-    expect(m1.cells.find((c) => c.id === 1)!.rowSpan).toBe(2)
+    const m0 = buildMesh(insetGrid(2, 2))
+    const m1 = mergeCells(m0, 1, 3)
     expect(m1.cells).toHaveLength(3)
+    const merged = m1.cells.find((c) => c.id === 1)!
+    expect(merged.rowSpan).toBe(2)
+    expect(cellRect(m1, merged)).toEqual({
+      x: m1.cols[0],
+      y: m1.rows[0],
+      w: m1.cols[1] - m1.cols[0],
+      h: m1.bounds.h,
+    })
   })
 
   it("refuses non-adjacent cells", () => {

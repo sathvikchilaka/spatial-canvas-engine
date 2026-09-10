@@ -1,7 +1,11 @@
 /// <reference lib="webworker" />
 import { createNodeArrays, pushNode, type NodeArrays, type NodeType, type Rect } from '@/data/nodes'
+import { parseFunsdPage, type FunsdForm } from '@/data/funsd/parse'
+import { serializeGeneratedPage } from '@/data/synthetic/serialize'
 import { QuadTree } from './quadtree'
 import { UNSOLICITED, type Req, type Res, type SerializedPage } from './protocol'
+
+const SYNTHETIC = 'synthetic://page/'
 
 const WORLD: Rect = { x: -10000, y: -10000, w: 100000, h: 4000000 }
 
@@ -17,7 +21,7 @@ function reset(bounds: Rect = WORLD) {
   indexById.clear()
 }
 
-function ingest(page: SerializedPage) {
+function ingest(page: SerializedPage, edges: number[] = []) {
   const start = nodes.count
   for (const n of page.nodes) {
     const i = pushNode(nodes, {
@@ -27,7 +31,6 @@ function ingest(page: SerializedPage) {
     indexById.set(n.id, i)
     tree.insert(n.id, n.x, n.y, n.w, n.h)
   }
-  const count = nodes.count - start
   // Slice out this page's rows and transfer them — cloning 10k objects would
   // itself blow the 16ms ingestion budget.
   const ids = nodes.ids.slice(start, nodes.count)
@@ -35,14 +38,38 @@ function ingest(page: SerializedPage) {
   const types = nodes.types.slice(start, nodes.count)
   const parents = nodes.parents.slice(start, nodes.count)
   const order = nodes.order.slice(start, nodes.count)
-  void count
+  const edgeArray = Int32Array.from(edges)
   const res: Res = {
     id: UNSOLICITED, kind: 'pageIngested', pageIndex: page.pageIndex,
-    ids, coords, types, parents, order,
+    ids, coords, types, parents, order, edges: edgeArray,
   }
   ;(self as unknown as Worker).postMessage(res, [
-    ids.buffer, coords.buffer, types.buffer, parents.buffer, order.buffer,
+    ids.buffer, coords.buffer, types.buffer, parents.buffer, order.buffer, edgeArray.buffer,
   ] as Transferable[])
+}
+
+/**
+ * The whole point of the worker: annotation files are fetched, parsed and
+ * indexed here. The main thread only ever sees transferable typed arrays.
+ * An unknown/malformed URL or a failed fetch throws — the caller replies
+ * with an `error` message rather than silently ingesting an empty page.
+ */
+async function ingestUrl(pageIndex: number, url: string, offsetX: number, offsetY: number) {
+  if (url.startsWith(SYNTHETIC)) {
+    const seed = Number(new URL(url).searchParams.get('seed') ?? 1)
+    // Same contract as the FUNSD branch: the page's world origin comes from
+    // the caller's PageGeometry, never from a layout formula duplicated here.
+    ingest({ pageIndex, nodes: serializeGeneratedPage(pageIndex, seed, offsetX, offsetY) })
+    return
+  }
+  if (!url.startsWith('/funsd/')) {
+    throw new Error(`ingestUrl: unrecognized URL scheme "${url}"`)
+  }
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`funsd fetch failed: ${res.status}`)
+  const form = (await res.json()) as FunsdForm
+  const { nodes: parsed, edges } = parseFunsdPage(form, pageIndex, offsetX, offsetY)
+  ingest({ pageIndex, nodes: parsed }, edges)
 }
 
 /** Topmost hit: smallest area wins, ties broken by later reading order. */
@@ -83,6 +110,11 @@ self.onmessage = (e: MessageEvent<Req>) => {
         break
       case 'ingestPage':
         ingest(msg.page)
+        break
+      case 'ingestUrl':
+        void ingestUrl(msg.pageIndex, msg.url, msg.offsetX, msg.offsetY).catch((err) =>
+          reply({ id: UNSOLICITED, kind: 'error', message: (err as Error).message }),
+        )
         break
       case 'hitTest':
         reply({ id: msg.id, kind: 'hit', nodeId: hitTest(msg.x, msg.y) })

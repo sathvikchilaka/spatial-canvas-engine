@@ -1,16 +1,42 @@
-import type { GeneratedPage } from '@/data/generator'
+import { PAGE_GAP, PAGE_H, PAGE_W, PAGES_PER_ROW } from '@/data/generator'
+import { gridGeometry, type PageGeometry } from '@/data/geometry'
 import type { NodeArrays } from '@/data/nodes'
+import type { PageRenderFn } from '@/data/pageRenderer'
 import { BucketGrid } from './bucketGrid'
 import { crispOffset, sizeCanvas } from './canvas'
 import { BoxLayer } from './layers/boxes'
-import { PageLayer, visiblePageRange } from './layers/pages'
+import { PageLayer } from './layers/pages'
 import { visibleWorldRect, type Viewport } from './viewport'
 
-const MAX_VISIBLE = 8192
+/**
+ * Cull-result capacity. The cull truncates at this cap, so it must exceed the
+ * most boxes a viewport can ever hold — with the contact-sheet layout, zooming
+ * to 10% puts the whole document in view. 32k indices is 128 KB, plus one
+ * same-sized style bucket per group; cheaper than silently dropping boxes.
+ */
+const MAX_VISIBLE = 32768
 
 export type FrameHook = (ms: number) => void
+/**
+ * Called once per animation frame whether or not we drew. `drew` separates
+ * "the display is keeping up" from "we had something to repaint" — the
+ * dirty-flag loop means a frame counter alone measures input rate, not speed.
+ */
+export type TickHook = (drew: boolean, ms: number) => void
 /** Extra painting on top of the box layer — tools draw their HUD here. */
 export type Overlay = (ctx: CanvasRenderingContext2D, vp: Viewport) => void
+
+/** Per-frame cost breakdown, overwritten in place — no per-frame allocation. */
+export type FramePerf = {
+  total: number
+  pages: number
+  cull: number
+  boxes: number
+  overlays: number
+  visible: number
+  /** True when the cull hit MAX_VISIBLE and dropped boxes that were in view. */
+  culledOut: boolean
+}
 
 /**
  * Owns the canvas, the transform, and the frame loop. Framework-agnostic:
@@ -20,15 +46,40 @@ export class CanvasEngine {
   private ctx: CanvasRenderingContext2D
   private vp: Viewport = { scale: 0.35, tx: 40, ty: 20 }
   private nodes: NodeArrays | null = null
-  private pages: GeneratedPage[] = []
+  private geometry: PageGeometry = gridGeometry(0, PAGE_W, PAGE_H, PAGE_GAP, PAGES_PER_ROW)
   private grid: BucketGrid = new BucketGrid()
   private readonly boxes = new BoxLayer(MAX_VISIBLE)
-  private readonly pageLayer = new PageLayer()
+  /** Public so a document switch can swap the raster source without rebuilding the engine. */
+  readonly pageLayer = new PageLayer()
+  /** Exposed for the perf bench: page raster count lives on the cache. */
+  get pageCache() {
+    return this.pageLayer.cache
+  }
+  /** Swaps the page raster source in place — used when the document changes. */
+  setPageRenderer(render: PageRenderFn, onReady: () => void): void {
+    this.pageLayer.setRenderer(render, onReady)
+  }
   /** preallocated cull result — never reallocated per frame */
   private readonly visible = new Uint32Array(MAX_VISIBLE)
   private visibleCount = 0
+  /**
+   * Bench escape hatch: skip the cull and submit every node, measuring the draw
+   * path's worst case directly rather than inferring it from whatever the
+   * viewport happened to hold.
+   */
+  cullDisabled = false
   private overlays: Overlay[] = []
   private frameHooks = new Set<FrameHook>()
+  private tickHooks = new Set<TickHook>()
+  readonly perf: FramePerf = {
+    total: 0,
+    pages: 0,
+    cull: 0,
+    boxes: 0,
+    overlays: 0,
+    visible: 0,
+    culledOut: false,
+  }
 
   private raf = 0
   private dirty = true
@@ -49,6 +100,11 @@ export class CanvasEngine {
     this.observeSize()
   }
 
+  /** The backing canvas — the bench dispatches synthetic pointer events at it. */
+  get canvasEl(): HTMLCanvasElement {
+    return this.canvas
+  }
+
   get viewport(): Viewport {
     return this.vp
   }
@@ -62,9 +118,9 @@ export class CanvasEngine {
     return { w: this.cssW, h: this.cssH }
   }
 
-  setData(nodes: NodeArrays, pages: GeneratedPage[], grid: BucketGrid): void {
+  setData(nodes: NodeArrays, grid: BucketGrid, geometry: PageGeometry): void {
     this.nodes = nodes
-    this.pages = pages
+    this.geometry = geometry
     this.grid = grid
     this.requestDraw()
   }
@@ -81,6 +137,11 @@ export class CanvasEngine {
     return () => this.frameHooks.delete(cb)
   }
 
+  onTick(cb: TickHook): () => void {
+    this.tickHooks.add(cb)
+    return () => this.tickHooks.delete(cb)
+  }
+
   /** Marks the frame dirty. Input handlers call this and never draw directly. */
   requestDraw(): void {
     this.dirty = true
@@ -89,13 +150,19 @@ export class CanvasEngine {
   start(): void {
     if (this.raf) return
     const tick = () => {
+      if (this.disposed) return
       this.raf = requestAnimationFrame(tick)
-      if (!this.dirty || this.disposed) return
+      if (!this.dirty) {
+        for (const cb of this.tickHooks) cb(false, 0)
+        return
+      }
       this.dirty = false
       const t0 = performance.now()
       this.draw()
       const ms = performance.now() - t0
+      this.perf.total = ms
       for (const cb of this.frameHooks) cb(ms)
+      for (const cb of this.tickHooks) cb(true, ms)
     }
     this.raf = requestAnimationFrame(tick)
   }
@@ -111,9 +178,9 @@ export class CanvasEngine {
     this.dprQuery = null
     this.overlays = []
     this.frameHooks.clear()
+    this.tickHooks.clear()
     this.pageLayer.dispose()
     this.nodes = null
-    this.pages = []
   }
 
   /** Culled node indices from the last frame — tools reuse them for picking. */
@@ -134,17 +201,39 @@ export class CanvasEngine {
     ctx.translate(vp.tx + crispOffset(this.dpr), vp.ty + crispOffset(this.dpr))
     ctx.scale(vp.scale, vp.scale)
 
-    if (this.pages.length) {
-      const [from, to] = visiblePageRange(world.y, world.h, this.pages.length)
-      this.pageLayer.draw(ctx, this.pages, from, to)
+    const perf = this.perf
+    let t = performance.now()
+    if (this.geometry.count) {
+      const [from, to] = this.geometry.rangeFor(world.y, world.h)
+      this.pageLayer.draw(ctx, this.geometry, from, to, world.x, world.w, vp.scale)
     }
+    const tPages = performance.now()
+    perf.pages = tPages - t
+    t = tPages
 
     if (nodes) {
-      this.visibleCount = this.grid.query(world.x, world.y, world.w, world.h, this.visible)
+      if (this.cullDisabled) {
+        const n = Math.min(nodes.count, this.visible.length)
+        for (let i = 0; i < n; i++) this.visible[i] = i
+        this.visibleCount = n
+      } else {
+        this.visibleCount = this.grid.query(world.x, world.y, world.w, world.h, this.visible)
+      }
+      const tCull = performance.now()
+      perf.cull = tCull - t
+      t = tCull
       this.boxes.draw(ctx, nodes, this.visible, this.visibleCount, vp.scale)
+      perf.boxes = performance.now() - t
+    } else {
+      perf.cull = 0
+      perf.boxes = 0
     }
+    perf.visible = this.visibleCount
+    perf.culledOut = this.visibleCount >= this.visible.length
 
+    t = performance.now()
     for (const o of this.overlays) o(ctx, vp)
+    perf.overlays = performance.now() - t
     ctx.restore()
   }
 

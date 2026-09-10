@@ -1,6 +1,7 @@
 // tests/worker/client.test.ts
 import { describe, it, expect, vi } from 'vitest'
 import { WorkerClient } from '@/worker/client'
+import { UNSOLICITED } from '@/worker/protocol'
 
 class FakeWorker {
   onmessage: ((e: MessageEvent) => void) | null = null
@@ -59,5 +60,43 @@ describe('WorkerClient', () => {
     c.dispose()
     expect(w.terminated).toBe(true)
     await expect(p).rejects.toThrow()
+  })
+})
+
+describe('WorkerClient.ingestUrl', () => {
+  it('posts an ingestUrl request with the page offset', () => {
+    const postMessage = vi.fn()
+    const worker = { postMessage, terminate: vi.fn() } as unknown as Worker
+    const client = new WorkerClient(worker)
+
+    client.ingestUrl(7, '/funsd/annotations/abc.json', 0, 7280)
+
+    expect(postMessage).toHaveBeenCalledWith({
+      id: UNSOLICITED,
+      kind: 'ingestUrl',
+      pageIndex: 7,
+      url: '/funsd/annotations/abc.json',
+      offsetX: 0,
+      offsetY: 7280,
+    })
+    client.dispose()
+  })
+
+  it('forwards the edges array to page subscribers', () => {
+    const worker = { postMessage: vi.fn(), terminate: vi.fn() } as unknown as Worker
+    const client = new WorkerClient(worker)
+    const seen: Int32Array[] = []
+    client.onPageIngested((p) => seen.push(p.edges))
+
+    worker.onmessage?.({
+      data: {
+        id: UNSOLICITED, kind: 'pageIngested', pageIndex: 0,
+        ids: new Uint32Array(0), coords: new Float32Array(0), types: new Uint8Array(0),
+        parents: new Int32Array(0), order: new Int32Array(0), edges: Int32Array.of(1, 2),
+      },
+    } as MessageEvent)
+
+    expect(Array.from(seen[0])).toEqual([1, 2])
+    client.dispose()
   })
 })

@@ -53,6 +53,13 @@ export class WorkerClient {
     this.worker.postMessage({ id: UNSOLICITED, kind: 'ingestPage', page } satisfies Req)
   }
 
+  /** Fire-and-forget: the worker fetches and parses; we only get typed arrays back. */
+  ingestUrl(pageIndex: number, url: string, offsetX: number, offsetY: number): void {
+    this.worker.postMessage({
+      id: UNSOLICITED, kind: 'ingestUrl', pageIndex, url, offsetX, offsetY,
+    } satisfies Req)
+  }
+
   onPageIngested(cb: (p: PageIngested) => void): () => void {
     this.pageSubs.add(cb)
     return () => this.pageSubs.delete(cb)

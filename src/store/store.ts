@@ -12,7 +12,6 @@ export { HISTORY_LIMIT }
 export type Edit = {
   rect?: Rect
   label?: string
-  orderNext?: number | null
   deleted?: true
 }
 
@@ -22,9 +21,20 @@ export type AppState = {
   dirtyAt: Record<number, number>
   selectedId: number | null
   hoveredId: number | null
+  /** Human-added graph edges, [from, to]. Base edges live outside the store. */
+  edgesAdded: [number, number][]
+  /** Base edges the human deleted. */
+  edgesRemoved: [number, number][]
 }
 
-const initial: AppState = { edits: {}, dirtyAt: {}, selectedId: null, hoveredId: null }
+const initial: AppState = {
+  edits: {},
+  dirtyAt: {},
+  selectedId: null,
+  hoveredId: null,
+  edgesAdded: [],
+  edgesRemoved: [],
+}
 
 export const useStore = create<AppState>(() => ({ ...initial }))
 

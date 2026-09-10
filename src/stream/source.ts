@@ -1,7 +1,5 @@
-import type { SerializedNode } from '@/worker/protocol'
-
 export type StreamEvent =
-  | { type: 'page'; pageIndex: number; nodes: SerializedNode[] }
+  | { type: 'page'; pageIndex: number; url: string }
   | { type: 'done' }
 
 export interface StreamSource {

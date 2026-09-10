@@ -8,7 +8,10 @@ describe('MockStreamSource', () => {
     const src = new MockStreamSource(10, 1)
     const seen: number[] = []
     let done = false
-    src.start((e) => { e.type === 'page' ? seen.push(e.pageIndex) : (done = true) })
+    src.start((e) => {
+      if (e.type === 'page') seen.push(e.pageIndex)
+      else done = true
+    })
     await vi.runAllTimersAsync()
     expect(seen.slice().sort((a, b) => a - b)).toEqual([...Array(10).keys()])
     expect(done).toBe(true)

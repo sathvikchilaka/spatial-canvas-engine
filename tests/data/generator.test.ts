@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { generatePage, generateDocument, pageOrigin, PAGE_W, PAGE_H } from '@/data/generator'
+import {
+  generatePage,
+  generateDocument,
+  pageOrigin,
+  PAGES_PER_ROW,
+  PAGE_W,
+  PAGE_H,
+} from '@/data/generator'
 
 describe('generator', () => {
   it('is deterministic for a given seed', () => {
@@ -29,9 +36,14 @@ describe('generator', () => {
     }
   })
 
-  it('stacks pages vertically without overlap', () => {
-    expect(pageOrigin(0)[1]).toBe(0)
-    expect(pageOrigin(1)[1]).toBeGreaterThanOrEqual(PAGE_H)
+  it('lays pages out as a contact sheet, wrapping without overlap', () => {
+    expect(pageOrigin(0)).toEqual([0, 0])
+    // Along a row, pages advance on x and share a y.
+    expect(pageOrigin(1)[0]).toBeGreaterThanOrEqual(PAGE_W)
+    expect(pageOrigin(1)[1]).toBe(0)
+    // The row wraps: page `PAGES_PER_ROW` returns to x=0 one row down.
+    expect(pageOrigin(PAGES_PER_ROW)[0]).toBe(0)
+    expect(pageOrigin(PAGES_PER_ROW)[1]).toBeGreaterThanOrEqual(PAGE_H)
   })
 
   it('produces ~10k nodes across 100 pages', () => {

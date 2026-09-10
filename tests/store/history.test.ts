@@ -2,7 +2,11 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { useStore, commit, applyStream, undo, redo, canUndo, canRedo, HISTORY_LIMIT } from '@/store/store'
 
-const reset = () => useStore.setState({ edits: {}, dirtyAt: {}, selectedId: null, hoveredId: null }, true)
+const reset = () =>
+  useStore.setState(
+    { edits: {}, dirtyAt: {}, selectedId: null, hoveredId: null, edgesAdded: [], edgesRemoved: [] },
+    true,
+  )
 
 describe('history', () => {
   beforeEach(reset)
@@ -55,6 +59,19 @@ describe('history', () => {
     undo()
     commit('b', (d) => { d.edits[2] = { label: 'b' } })
     expect(canRedo()).toBe(false)
+  })
+
+  it('undoes and redoes an edge mutation without touching unrelated edges', () => {
+    commit('link:1', (d) => { d.edgesAdded = [...d.edgesAdded, [1, 2]] })
+    commit('link:2', (d) => { d.edgesAdded = [...d.edgesAdded, [3, 4]] })
+    expect(useStore.getState().edgesAdded).toEqual([[1, 2], [3, 4]])
+    undo()
+    expect(useStore.getState().edgesAdded).toEqual([[1, 2]])
+    redo()
+    expect(useStore.getState().edgesAdded).toEqual([[1, 2], [3, 4]])
+    undo()
+    undo()
+    expect(useStore.getState().edgesAdded).toEqual([])
   })
 
   it('coalesces rapid same-key edits into one entry', () => {

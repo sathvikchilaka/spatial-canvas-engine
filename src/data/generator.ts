@@ -7,7 +7,8 @@ export const PAGE_GAP = 40
 
 const MARGIN = 90
 const CONTENT_W = PAGE_W - MARGIN * 2
-const LINE_H = 18
+// Tightened from 18 so a 100-page document clears the 10k-box bar.
+const LINE_H = 15
 
 export type Line = { x: number; y: number; w: number; h: number }
 export type Cell = { x: number; y: number; w: number; h: number; row: number; col: number }
@@ -46,9 +47,19 @@ const TYPE_OF_KIND: Record<BlockKind, NodeType> = {
   kv: NodeType.KeyValue,
 }
 
-/** Top-left of a page in world space — pages stack vertically. */
+/**
+ * Pages of the synthetic document sit in a contact sheet, not one tall column.
+ * Must stay in step with the `gridGeometry` the engine builds for the paper —
+ * this places the boxes, that places the paper under them.
+ */
+export const PAGES_PER_ROW = 10
+
+/** Top-left of a page in world space. */
 export function pageOrigin(pageIndex: number): [number, number] {
-  return [0, pageIndex * (PAGE_H + PAGE_GAP)]
+  return [
+    (pageIndex % PAGES_PER_ROW) * (PAGE_W + PAGE_GAP),
+    Math.floor(pageIndex / PAGES_PER_ROW) * (PAGE_H + PAGE_GAP),
+  ]
 }
 
 export function generatePage(pageIndex: number, seed: number): GeneratedPage {
@@ -75,7 +86,7 @@ export function generatePage(pageIndex: number, seed: number): GeneratedPage {
   }
 
   const paragraph = () => {
-    const n = ri(6, 14)
+    const n = ri(8, 16)
     const h = n * LINE_H
     if (!fits(h)) return false
     const lines: Line[] = []
@@ -186,8 +197,9 @@ export function appendPageNodes(
 ): void {
   const [ox, oy] = pageOrigin(page.index)
   for (const b of page.blocks) {
-    const parentIndex = pushNode(a, {
-      id: nextId.v++,
+    const parentId = nextId.v++
+    pushNode(a, {
+      id: parentId,
       page: page.index,
       x: ox + b.x,
       y: oy + b.y,
@@ -209,7 +221,7 @@ export function appendPageNodes(
         w: k.w,
         h: k.h,
         type: childType,
-        parent: parentIndex,
+        parent: parentId,
         order: a.count,
       })
     }

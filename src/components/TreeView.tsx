@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
-import { NodeType, type NodeArrays } from "@/data/nodes"
+import { NodeType, indexOfId, type NodeArrays } from "@/data/nodes"
 import { cn } from "@/lib/utils"
 import { useStore } from "@/store/store"
 
@@ -25,23 +25,24 @@ const TYPE_LABEL: Record<number, string> = {
 
 /** Flattens the node hierarchy to the rows currently revealed. */
 export function buildTreeRows(nodes: NodeArrays, expanded: Set<number>): TreeRow[] {
+  // `parents[i]` holds the parent's *id* (the wire shape), not its row index.
   const childrenOf = new Map<number, number[]>()
   const roots: number[] = []
   for (let i = 0; i < nodes.count; i++) {
-    const p = nodes.parents[i]
-    if (p < 0) {
+    const pid = nodes.parents[i]
+    if (pid < 0) {
       roots.push(i)
       continue
     }
-    const list = childrenOf.get(p)
+    const list = childrenOf.get(pid)
     if (list) list.push(i)
-    else childrenOf.set(p, [i])
+    else childrenOf.set(pid, [i])
   }
 
   const rows: TreeRow[] = []
   const visit = (index: number, depth: number) => {
-    const kids = childrenOf.get(index)
     const id = nodes.ids[index]
+    const kids = childrenOf.get(id)
     rows.push({
       id,
       depth,
@@ -91,7 +92,33 @@ export function TreeView({ nodes, version, onFocus }: Props) {
     return () => ro.disconnect()
   }, [])
 
-  // Canvas → tree: scroll the selected row into view.
+  // Canvas → tree: a canvas pick usually lands on a leaf (Line/Cell) whose
+  // parent is still collapsed, so the row does not exist yet. Expand the
+  // ancestor chain on selection change; the scroll effect below then runs.
+  useEffect(() => {
+    if (!nodes) return
+    return useStore.subscribe((state, prev) => {
+      const id = state.selectedId
+      if (id === null || id === prev.selectedId) return
+      const chain: number[] = []
+      let i = indexOfId(nodes, id)
+      while (i >= 0) {
+        const pid = nodes.parents[i]
+        if (pid < 0) break
+        chain.push(pid)
+        i = indexOfId(nodes, pid)
+      }
+      if (!chain.length) return
+      setExpanded((prevSet) => {
+        if (chain.every((c) => prevSet.has(c))) return prevSet
+        const next = new Set(prevSet)
+        for (const c of chain) next.add(c)
+        return next
+      })
+    })
+  }, [nodes])
+
+  // Scroll the selected row into view once it exists.
   useEffect(() => {
     if (selectedId === null) return
     const at = rows.findIndex((r) => r.id === selectedId)

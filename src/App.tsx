@@ -1,18 +1,23 @@
 import { useEffect, useRef, useState } from "react"
 
+import { benchPan, benchPick } from "@/app/bench"
+import { ingestReport, markStreamDone, startIngestProbe, stopIngestProbe } from "@/app/ingestProbe"
 import { Session } from "@/app/session"
+import { DocumentPicker, type DocumentId } from "@/components/DocumentPicker"
 import { StatusBar } from "@/components/StatusBar"
 import { Toolbar, type ToolName } from "@/components/Toolbar"
 import { TreeView } from "@/components/TreeView"
 import { Button } from "@/components/ui/button"
+import { createFunsdDocument } from "@/data/funsd/source"
 import type { NodeArrays } from "@/data/nodes"
-import { canRedo, canUndo, redo, undo, useStore } from "@/store/store"
+import { createSyntheticDocument } from "@/data/synthetic/source"
+import { canRedo, canUndo, redo, resetHistory, undo, useStore } from "@/store/store"
 
 export function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const sessionRef = useRef<Session | null>(null)
   const [nodes, setNodes] = useState<NodeArrays | null>(null)
-  const [stats, setStats] = useState({ fps: 0, zoom: 0.35 })
+  const [stats, setStats] = useState({ fps: 0, drawMs: 0, drawn: 0, zoom: 0.35 })
   const [stream, setStream] = useState({
     pagesReceived: 0,
     shielded: 0,
@@ -20,38 +25,95 @@ export function App() {
     done: false,
   })
   const [tool, setTool] = useState<ToolName>("select")
+  const [docId, setDocId] = useState<DocumentId>("funsd")
   const selectedId = useStore((s) => s.selectedId)
 
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
-    const session = new Session(canvas)
-    sessionRef.current = session
-    setNodes(session.nodes)
 
-    let frames = 0
-    let since = performance.now()
-    const offFrame = session.engine.onFrame(() => {
-      frames++
-      const now = performance.now()
-      if (now - since >= 500) {
-        setStats({
-          fps: Math.round((frames * 1000) / (now - since)),
-          zoom: session.engine.viewport.scale,
-        })
-        frames = 0
-        since = now
+    let cancelled = false
+    let offFrame: (() => void) | null = null
+    // The probe is a module-scope rAF loop + PerformanceObserver; it must be
+    // owned by the mount, or it outlives every session it was measuring.
+    startIngestProbe()
+
+    const build = async () => {
+      const doc =
+        docId === "funsd" ? await createFunsdDocument() : createSyntheticDocument(100, 1)
+      if (cancelled) return
+
+      const session = new Session(canvas, doc)
+      sessionRef.current = session
+      // Console perf harness: `await __bench()` for a 5s scripted pan.
+      // Dev always; in a production build only with ?bench=1, so the handles
+      // never dangle in a real deployment.
+      if (import.meta.env.DEV || new URLSearchParams(location.search).has("bench")) {
+        const w = window as unknown as Record<string, unknown>
+        w.__session = session
+        w.__bench = (opts?: unknown) => benchPan(session, opts as never)
+        w.__pick = (samples?: number) => benchPick(session, samples)
+        w.__ingest = () => ingestReport()
       }
-    })
-    void session.connectStream(() => setStream({ ...session.status }))
+      setNodes(session.nodes)
+
+      // fps = animation-frame rate (are we keeping up with the display), drawMs =
+      // worst repaint cost in the window. Counting only repainted frames would
+      // report the input event rate: a dirty-flag loop draws nothing when idle.
+      let ticks = 0
+      let drawn = 0
+      let worst = 0
+      let since = performance.now()
+      offFrame = session.engine.onTick((drew, ms) => {
+        ticks++
+        if (drew) {
+          drawn++
+          if (ms > worst) worst = ms
+        }
+        const now = performance.now()
+        if (now - since >= 500) {
+          setStats({
+            fps: Math.round((ticks * 1000) / (now - since)),
+            drawMs: Math.round(worst * 100) / 100,
+            drawn,
+            zoom: session.engine.viewport.scale,
+          })
+          ticks = 0
+          drawn = 0
+          worst = 0
+          since = now
+        }
+      })
+      void session.connectStream(() => {
+        if (session.status.done) markStreamDone()
+        setStream({ ...session.status })
+      })
+    }
+    void build()
 
     return () => {
-      offFrame()
-      session.dispose()
+      cancelled = true
+      stopIngestProbe()
+      offFrame?.()
+      sessionRef.current?.dispose()
       sessionRef.current = null
+      // The perf handles must never address a disposed session — null them
+      // alongside the ref so a stray `__bench()` from the console (or a
+      // build still in flight) fails loudly instead of touching a corpse.
+      const w = window as unknown as Record<string, unknown>
+      w.__session = null
+      w.__bench = null
+      w.__pick = null
+      w.__ingest = null
       setNodes(null)
+      setStream({ pagesReceived: 0, shielded: 0, connected: false, done: false })
+      useStore.setState(
+        { edits: {}, dirtyAt: {}, selectedId: null, hoveredId: null, edgesAdded: [], edgesRemoved: [] },
+        true,
+      )
+      resetHistory()
     }
-  }, [])
+  }, [docId])
 
   return (
     <div className="flex h-svh flex-col bg-background text-foreground antialiased">
@@ -61,6 +123,7 @@ export function App() {
           {selectedId === null ? "no selection" : `node #${selectedId}`}
         </span>
         <div className="ml-auto flex items-center gap-2">
+          <DocumentPicker value={docId} onChange={setDocId} />
           <Toolbar
             active={tool}
             onChange={(t) => {

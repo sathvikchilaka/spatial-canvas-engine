@@ -1,6 +1,3 @@
-import { generatePage, pageOrigin } from '@/data/generator'
-import { NodeType } from '@/data/nodes'
-import type { SerializedNode } from '@/worker/protocol'
 import type { StreamEvent, StreamSource } from './source'
 
 function mulberry32(a: number) {
@@ -22,31 +19,6 @@ export function shuffledPages(count: number, seed: number): number[] {
     ;[order[i], order[j]] = [order[j], order[i]]
   }
   return order
-}
-
-/** Nodes for one generated page, in the wire shape the worker parses. */
-export function serializeGeneratedPage(pageIndex: number, seed: number): SerializedNode[] {
-  const page = generatePage(pageIndex, seed)
-  const [ox, oy] = pageOrigin(pageIndex)
-  const out: SerializedNode[] = []
-  let id = pageIndex * 1000 + 1
-  let order = 0
-  for (const b of page.blocks) {
-    const parent = id
-    out.push({
-      id: id++, page: pageIndex, x: ox + b.x, y: oy + b.y, w: b.w, h: b.h,
-      type: b.kind === 'figure' ? NodeType.Figure : NodeType.Paragraph,
-      parent: -1, order: order++,
-    })
-    for (const k of b.cells ?? b.lines ?? []) {
-      out.push({
-        id: id++, page: pageIndex, x: ox + k.x, y: oy + k.y, w: k.w, h: k.h,
-        type: b.cells ? NodeType.Cell : NodeType.Line,
-        parent, order: order++,
-      })
-    }
-  }
-  return out
 }
 
 /**
@@ -78,7 +50,7 @@ export class MockStreamSource implements StreamSource {
       this.timers.push(
         setTimeout(() => {
           if (this.stopped) return
-          onEvent({ type: 'page', pageIndex, nodes: serializeGeneratedPage(pageIndex, this.seed) })
+          onEvent({ type: 'page', pageIndex, url: `synthetic://page/${pageIndex}?seed=${this.seed}` })
         }, t) as unknown as number,
       )
     })

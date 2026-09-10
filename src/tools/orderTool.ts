@@ -1,36 +1,8 @@
 import type { Rect } from '@/data/nodes'
-import { indexOfId, type NodeArrays } from '@/data/nodes'
 import { drawSelectionHud } from '@/engine/layers/hud'
 import type { Viewport } from '@/engine/viewport'
-import { commit, useStore, type Edit } from '@/store/store'
+import { commit, useStore } from '@/store/store'
 import type { Tool, ToolEvent } from './types'
-
-/** Reading sequence after edits: `orderNext` overrides re-parent the chain. */
-export function orderedIds(nodes: NodeArrays, edits: Record<number, Edit>): Uint32Array {
-  const base: number[] = []
-  for (let i = 0; i < nodes.count; i++) base.push(nodes.ids[i])
-  base.sort((a, b) => nodes.order[indexOfId(nodes, a)] - nodes.order[indexOfId(nodes, b)])
-  let seq: Uint32Array<ArrayBufferLike> = Uint32Array.from(base)
-  for (const key of Object.keys(edits)) {
-    const from = Number(key)
-    const next = edits[from]?.orderNext
-    if (next !== undefined && next !== null) seq = relink(seq, from, next)
-  }
-  return Uint32Array.from(seq)
-}
-
-/** Makes `toId` the immediate successor of `fromId`, without gaps or duplicates. */
-export function relink(order: Uint32Array, fromId: number, toId: number): Uint32Array {
-  if (fromId === toId) return order
-  const list = Array.from(order)
-  const to = list.indexOf(toId)
-  if (to < 0) return order
-  list.splice(to, 1)
-  const from = list.indexOf(fromId)
-  if (from < 0) return order
-  list.splice(from + 1, 0, toId)
-  return Uint32Array.from(list)
-}
 
 export type Arrow = { x1: number; y1: number; x2: number; y2: number; headAngle: number }
 
@@ -61,6 +33,7 @@ export type OrderToolDeps = {
   getRect(id: number): Rect | null
   pick(wx: number, wy: number): Promise<number | null>
   requestDraw(): void
+  hasEdge(from: number, to: number): boolean
 }
 
 /** Drag from a selected box onto another to make it the successor. */
@@ -104,8 +77,10 @@ export class OrderTool implements Tool {
     if (from === null) return
     void this.deps.pick(e.world[0], e.world[1]).then((to) => {
       if (to !== null && to !== from) {
-        commit('relink', (d) => {
-          d.edits[from] = { ...d.edits[from], orderNext: to }
+        const exists = this.deps.hasEdge(from, to)
+        commit(exists ? 'unlink' : 'link', (d) => {
+          if (exists) d.edgesRemoved = [...d.edgesRemoved, [from, to]]
+          else d.edgesAdded = [...d.edgesAdded, [from, to]]
           d.dirtyAt[from] = Date.now()
         })
       }

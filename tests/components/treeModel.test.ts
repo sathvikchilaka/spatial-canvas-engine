@@ -3,11 +3,12 @@ import { describe, it, expect } from 'vitest'
 import { buildTreeRows } from '@/components/TreeView'
 import { createNodeArrays, pushNode, NodeType } from '@/data/nodes'
 
+// `parent` is the parent's id (node 1), not its array index.
 function tree() {
   const a = createNodeArrays(8)
   pushNode(a, { id: 1, page: 0, x: 0, y: 0, w: 10, h: 10, type: NodeType.Paragraph, parent: -1, order: 0 })
-  pushNode(a, { id: 2, page: 0, x: 0, y: 0, w: 5, h: 2, type: NodeType.Line, parent: 0, order: 1 })
-  pushNode(a, { id: 3, page: 0, x: 0, y: 3, w: 5, h: 2, type: NodeType.Line, parent: 0, order: 2 })
+  pushNode(a, { id: 2, page: 0, x: 0, y: 0, w: 5, h: 2, type: NodeType.Line, parent: 1, order: 1 })
+  pushNode(a, { id: 3, page: 0, x: 0, y: 3, w: 5, h: 2, type: NodeType.Line, parent: 1, order: 2 })
   return a
 }
 

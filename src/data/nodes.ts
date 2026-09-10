@@ -23,6 +23,7 @@ export type NodeArrays = {
   ids: Uint32Array
   pages: Uint16Array
   types: Uint8Array
+  /** Parent **id** per node (-1 = root). See `NodeInit.parent`. */
   parents: Int32Array
   /** reading-order index, -1 if none */
   order: Int32Array
@@ -39,6 +40,10 @@ export type NodeInit = {
   w: number
   h: number
   type: NodeType
+  /**
+   * Parent node's **id**, or -1 for a root. Never an array index: indices shift
+   * when the arrays grow or a streamed page replaces an earlier one, ids do not.
+   */
   parent: number
   order: number
 }

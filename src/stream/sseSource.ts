@@ -1,5 +1,14 @@
 import type { StreamEvent, StreamSource } from './source'
 
+/**
+ * NOT WIRED. Both `DocumentSource.createStream()` implementations return the
+ * timer-driven, SSE-shaped replays instead, so nothing in the app imports this
+ * module and `server/sse.mjs` / `pnpm dev:sse` are only reachable by hand. Kept
+ * because it is the transport the `StreamSource` interface was shaped for; see
+ * ARCHITECTURE.md §2 ("Transport (stream)"), which says so rather than
+ * implying the EventSource path runs.
+ */
+
 const RECONNECT_BASE_MS = 500
 const RECONNECT_MAX_MS = 8000
 

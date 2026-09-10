@@ -1,20 +1,21 @@
-import { generateDocument, type GeneratedPage } from '@/data/generator'
-import { FLAG_DIRTY, FLAG_SELECTED, indexOfId, type NodeArrays, type Rect } from '@/data/nodes'
+import { createNodeArrays, FLAG_DIRTY, FLAG_SELECTED, indexOfId, pushNode, type NodeArrays, type NodeType, type Rect } from '@/data/nodes'
+import type { DocumentSource } from '@/data/document'
+import type { PageGeometry } from '@/data/geometry'
 import { BucketGrid } from '@/engine/bucketGrid'
 import { CanvasEngine } from '@/engine/engine'
 import { attachInput } from '@/engine/input'
 import { screenToWorld } from '@/engine/viewport'
 import { redo, undo, useStore } from '@/store/store'
 import { toolHandlers } from '@/tools/adapter'
-import { OrderTool, orderedIds } from '@/tools/orderTool'
+import { OrderTool } from '@/tools/orderTool'
 import { SelectTool } from '@/tools/selectTool'
 import { OrderOverlay } from '@/engine/layers/overlays'
+import { appendEdges, createEdgeSet, hasEdge, materialize, type EdgeSet } from '@/data/edges'
 import type { Tool } from '@/tools/types'
 import { applyPageUpdate } from '@/store/merge'
 import type { StreamEvent, StreamSource } from '@/stream/source'
-import { createStreamSource } from '@/stream/sseSource'
 import { WorkerClient } from '@/worker/client'
-import type { SerializedPage } from '@/worker/protocol'
+import type { PageIngested } from '@/worker/protocol'
 
 const WORLD: Rect = { x: -2000, y: -2000, w: 20000, h: 400000 }
 
@@ -26,8 +27,13 @@ export class Session {
   readonly engine: CanvasEngine
   readonly worker: WorkerClient
   readonly grid = new BucketGrid()
-  nodes: NodeArrays
-  pages: GeneratedPage[]
+  /** Empty until the stream ingests pages — there is no local truth ahead of it. */
+  nodes: NodeArrays = createNodeArrays(1024)
+  /** Resolves once the document's geometry is known and the engine has it. */
+  readonly ready: Promise<void>
+
+  private readonly doc: DocumentSource
+  private geometry!: PageGeometry
 
   private readonly detachers: (() => void)[] = []
   private readonly selectTool: SelectTool
@@ -36,49 +42,77 @@ export class Session {
   private tool: Tool
   private toolName: 'select' | 'order' = 'select'
   private orderDirty = true
+  private baseEdges: EdgeSet = createEdgeSet()
+  private effectiveEdges: EdgeSet = createEdgeSet()
   private readonly rectScratch = new Float32Array(4)
-  private ingestTimer = 0
+  private readonly pageRect = new Float32Array(4)
+  /**
+   * The stream's geometry per node, parallel to `nodes.coords` (x/y/w/h at
+   * `i * 4`). `applyEdits` writes human edits *into* `nodes.coords`, which
+   * destroys the baseline it would need to put a node back when its edit is
+   * undone — so the baseline is kept here instead of being re-derived.
+   */
+  private baseCoords = new Float32Array(1024 * 4)
+  /** Node ids whose `nodes.coords` currently hold an edit, not the stream value. */
+  private readonly overridden = new Set<number>()
   private stream: StreamSource | null = null
+  /** Set by `dispose()`. Guards every continuation that resumes after an await. */
+  private disposed = false
   private streamQueue: StreamEvent[] = []
   private drainTimer = 0
   /** Reported to the UI: pages seen, and edits the shield preserved. */
   status = { pagesReceived: 0, shielded: 0, connected: false, done: false }
   private onStatusChange: (() => void) | null = null
 
-  constructor(canvas: HTMLCanvasElement, pageCount = 100, seed = 1) {
+  constructor(canvas: HTMLCanvasElement, doc: DocumentSource) {
+    this.doc = doc
     this.engine = new CanvasEngine(canvas)
     this.worker = new WorkerClient(
       new Worker(new URL('../worker/index.worker.ts', import.meta.url), { type: 'module' }),
     )
-    void this.worker.init(WORLD)
+    // Disposing before `init` settles rejects it; that is expected teardown,
+    // not a failure, and an unhandled rejection would surface as a console
+    // error on every fast document switch.
+    void this.worker.init(WORLD).catch((err) => {
+      if (!this.disposed) throw err
+    })
 
-    const doc = generateDocument(pageCount, seed)
-    this.nodes = doc.nodes
-    this.pages = doc.pages
+    // Swap the raster source in without reconstructing the engine — a raster
+    // decode is async (real FUNSD PNGs), the engine construction is not.
+    this.engine.setPageRenderer(
+      (index) => doc.raster(index),
+      () => this.engine.requestDraw(),
+    )
 
-    // The worker owns the authoritative index; it needs the same nodes.
-    // Chunked across frames — serializing 100 pages at once would be a long task.
-    this.queueIngest()
-
-    const indices = new Uint32Array(this.nodes.count)
-    for (let i = 0; i < this.nodes.count; i++) indices[i] = i
-    this.grid.addPage(0, this.nodes.ids, this.nodes.coords, indices)
-    this.engine.setData(this.nodes, this.pages, this.grid)
+    this.ready = doc.geometry().then((geometry) => {
+      // Same continuation hazard as `connectStream`: geometry can settle after
+      // a document switch already tore this session down.
+      if (this.disposed) return
+      this.geometry = geometry
+      this.engine.setData(this.nodes, this.grid, geometry)
+    })
 
     this.selectTool = new SelectTool({
       getRect: (id) => this.rectOf(id),
       pick: (x, y) => this.worker.hitTest(x, y),
       nearby: (rect, pad, out, excludeId) => this.nearby(rect, pad, out, excludeId),
       requestDraw: () => this.engine.requestDraw(),
-      onCommit: (id, from, to) => void this.worker.updateNode(id, from, to),
+      // A commit landing after dispose rejects with "worker disposed" — that is
+      // teardown, not a failure, and must not surface as an unhandled rejection.
+      onCommit: (id, from, to) =>
+        void this.worker.updateNode(id, from, to).catch((err) => {
+          if (!this.disposed) throw err
+        }),
     })
     this.orderTool = new OrderTool({
       getRect: (id) => this.rectOf(id),
       pick: (x, y) => this.worker.hitTest(x, y),
       requestDraw: () => this.engine.requestDraw(),
+      hasEdge: (f, t) => hasEdge(this.effectiveEdges, f, t),
     })
     this.tool = this.selectTool
 
+    this.detachers.push(this.worker.onPageIngested((p) => this.onPageIngested(p)))
     this.detachers.push(this.engine.addOverlay((ctx, vp) => this.drawOrder(ctx, vp.scale)))
     this.detachers.push(this.engine.addOverlay((ctx, vp) => this.drawHover(ctx, vp.scale)))
     this.detachers.push(this.engine.addOverlay((ctx, vp) => this.tool.drawHud(ctx, vp)))
@@ -102,19 +136,19 @@ export class Session {
 
   /**
    * Connects the live stream. Events queue and drain a bounded slice per tick
-   * so ingestion never blocks a frame.
+   * so ingestion never blocks a frame. Waits for `ready` first — the drain
+   * loop needs page geometry to compute each page's world origin.
    */
   async connectStream(onStatusChange?: () => void): Promise<void> {
     this.onStatusChange = onStatusChange ?? null
-    this.stream = await createStreamSource({
-      pageCount: this.pages.length,
-      seed: 1,
-      onStatus: (connected) => {
-        this.status.connected = connected
-        this.onStatusChange?.()
-      },
-    })
+    await this.ready
+    // Switching documents can dispose this session while `doc.geometry()` is
+    // still pending. Without this guard the continuation installs a live source
+    // on a corpse: its timers fire forever into a terminated worker.
+    if (this.disposed) return
+    this.stream = this.doc.createStream()
     this.status.connected = true
+    this.onStatusChange?.()
     this.stream.start((e) => {
       this.streamQueue.push(e)
       this.scheduleDrain()
@@ -122,7 +156,7 @@ export class Session {
   }
 
   private scheduleDrain() {
-    if (this.drainTimer) return
+    if (this.drainTimer || this.disposed) return
     this.drainTimer = window.setTimeout(() => {
       this.drainTimer = 0
       const budgetEnd = performance.now() + 8
@@ -132,10 +166,10 @@ export class Session {
           this.status.done = true
           continue
         }
-        this.worker.ingestPage({ pageIndex: e.pageIndex, nodes: e.nodes })
-        const r = applyPageUpdate(e.pageIndex, e.nodes)
-        this.status.pagesReceived++
-        this.status.shielded += r.shielded
+        // The worker fetches/parses the url and reports back via
+        // onPageIngested — the main thread never touches the raw payload.
+        this.geometry.origin(e.pageIndex, this.pageRect)
+        this.worker.ingestUrl(e.pageIndex, e.url, this.pageRect[0], this.pageRect[1])
       }
       this.onStatusChange?.()
       this.engine.requestDraw()
@@ -143,16 +177,40 @@ export class Session {
     }, 0)
   }
 
-  /** Feeds pages to the worker a few per tick so no task exceeds the budget. */
-  private queueIngest(batch = 4) {
-    let next = 0
-    const step = () => {
-      const end = Math.min(this.pages.length, next + batch)
-      for (; next < end; next++) this.worker.ingestPage(this.serializePage(next))
-      if (next < this.pages.length) this.ingestTimer = window.setTimeout(step, 0)
-      else this.ingestTimer = 0
+  /**
+   * The worker's authoritative reply for one page: appends its nodes/edges
+   * into the local arrays and the grid, then runs the dirty shield (R6) so a
+   * late-arriving page can never clobber a box the human already edited.
+   */
+  private onPageIngested(p: PageIngested) {
+    const indices = new Uint32Array(p.ids.length)
+    for (let i = 0; i < p.ids.length; i++) {
+      const c = i * 4
+      indices[i] = pushNode(this.nodes, {
+        id: p.ids[i],
+        page: p.pageIndex,
+        x: p.coords[c],
+        y: p.coords[c + 1],
+        w: p.coords[c + 2],
+        h: p.coords[c + 3],
+        type: p.types[i] as NodeType,
+        parent: p.parents[i],
+        order: p.order[i],
+      })
     }
-    this.ingestTimer = window.setTimeout(step, 0)
+    this.rememberBase(indices, p.coords)
+    this.grid.addPage(p.pageIndex, p.ids, p.coords, indices)
+    if (p.edges.length > 0) {
+      appendEdges(this.baseEdges, p.edges)
+    }
+    this.orderDirty = true
+
+    // Typed arrays straight in — no per-node object just to shield-merge them.
+    const r = applyPageUpdate(p.pageIndex, p.ids, p.coords)
+    this.status.pagesReceived++
+    this.status.shielded += r.shielded
+    this.onStatusChange?.()
+    this.engine.requestDraw()
   }
 
   get activeTool() {
@@ -172,15 +230,13 @@ export class Session {
 
   showOrder = false
 
-  /** Reading-order arrows, rebuilt lazily — the sequence changes rarely. */
+  /** Reading-order arrows, rebuilt lazily — the graph changes rarely. */
   private drawOrder(ctx: CanvasRenderingContext2D, scale: number) {
     if (!this.showOrder) return
     if (this.orderDirty) {
-      this.orderOverlay.setSequence(
-        this.nodes,
-        orderedIds(this.nodes, useStore.getState().edits),
-        (id) => indexOfId(this.nodes, id),
-      )
+      const s = useStore.getState()
+      this.effectiveEdges = materialize(this.baseEdges, s.edgesAdded, s.edgesRemoved, this.nodes)
+      this.orderOverlay.setGraph(this.effectiveEdges)
       this.orderDirty = false
     }
     const sel = useStore.getState().selectedId
@@ -219,9 +275,15 @@ export class Session {
       requestAnimationFrame(() => {
         pending = false
         const [wx, wy] = screenToWorld(this.engine.viewport, lastX, lastY)
-        void this.worker.hitTest(wx, wy).then((id) => {
-          if (useStore.getState().hoveredId !== id) useStore.setState({ hoveredId: id })
-        })
+        void this.worker
+          .hitTest(wx, wy)
+          .then((id) => {
+            if (this.disposed) return
+            if (useStore.getState().hoveredId !== id) useStore.setState({ hoveredId: id })
+          })
+          .catch((err) => {
+            if (!this.disposed) throw err
+          })
       })
     }
     canvas.addEventListener('pointermove', onMove)
@@ -257,26 +319,6 @@ export class Session {
     }
   }
 
-  serializePage(pageIndex: number): SerializedPage {
-    const nodes = []
-    for (let i = 0; i < this.nodes.count; i++) {
-      if (this.nodes.pages[i] !== pageIndex) continue
-      const c = i * 4
-      nodes.push({
-        id: this.nodes.ids[i],
-        page: pageIndex,
-        x: this.nodes.coords[c],
-        y: this.nodes.coords[c + 1],
-        w: this.nodes.coords[c + 2],
-        h: this.nodes.coords[c + 3],
-        type: this.nodes.types[i],
-        parent: this.nodes.parents[i],
-        order: this.nodes.order[i],
-      })
-    }
-    return { pageIndex, nodes }
-  }
-
   /** Candidate rects near `rect`, for snapping. Writes into `out`. */
   private nearby(rect: Rect, pad: number, out: Float32Array, excludeId: number): number {
     const idx = new Uint32Array(out.length / 4)
@@ -293,6 +335,26 @@ export class Session {
       k++
     }
     return k
+  }
+
+  /**
+   * Records the stream geometry for a freshly ingested page, growing in step
+   * with `nodes.coords` so index `i` means the same node in both.
+   */
+  private rememberBase(indices: Uint32Array, coords: Float32Array) {
+    if (this.baseCoords.length < this.nodes.coords.length) {
+      const grown = new Float32Array(this.nodes.coords.length)
+      grown.set(this.baseCoords)
+      this.baseCoords = grown
+    }
+    for (let i = 0; i < indices.length; i++) {
+      const dst = indices[i] * 4
+      const src = i * 4
+      this.baseCoords[dst] = coords[src]
+      this.baseCoords[dst + 1] = coords[src + 1]
+      this.baseCoords[dst + 2] = coords[src + 2]
+      this.baseCoords[dst + 3] = coords[src + 3]
+    }
   }
 
   /** Mirrors store selection/dirty state into the render flags. */
@@ -313,33 +375,53 @@ export class Session {
     })
   }
 
-  /** Committed edits win over the extracted geometry in the render arrays. */
+  /**
+   * Committed edits win over the extracted geometry in the render arrays — and,
+   * just as importantly, an edit that *disappears* (undo, or a redo rewound
+   * past it) puts the stream geometry back. Both loops are O(human edits): the
+   * store no longer mirrors clean nodes, and `overridden` remembers exactly
+   * which nodes were overwritten so nothing has to re-walk the document.
+   */
   private applyEdits(edits: Record<number, { rect?: Rect }>) {
     for (const key of Object.keys(edits)) {
       const rect = edits[Number(key)]?.rect
       if (!rect) continue
-      const i = indexOfId(this.nodes, Number(key))
+      const id = Number(key)
+      const i = indexOfId(this.nodes, id)
       if (i < 0) continue
       const c = i * 4
       this.nodes.coords[c] = rect.x
       this.nodes.coords[c + 1] = rect.y
       this.nodes.coords[c + 2] = rect.w
       this.nodes.coords[c + 3] = rect.h
+      this.overridden.add(id)
+    }
+    if (this.overridden.size === 0) return
+    for (const id of this.overridden) {
+      if (edits[id]?.rect) continue
+      this.overridden.delete(id)
+      const i = indexOfId(this.nodes, id)
+      if (i < 0) continue
+      const c = i * 4
+      this.nodes.coords[c] = this.baseCoords[c]
+      this.nodes.coords[c + 1] = this.baseCoords[c + 1]
+      this.nodes.coords[c + 2] = this.baseCoords[c + 2]
+      this.nodes.coords[c + 3] = this.baseCoords[c + 3]
     }
     void this.rectScratch
   }
 
   dispose(): void {
+    this.disposed = true
     this.stream?.stop()
     this.stream = null
     this.streamQueue.length = 0
     if (this.drainTimer) clearTimeout(this.drainTimer)
     this.drainTimer = 0
     this.onStatusChange = null
-    if (this.ingestTimer) clearTimeout(this.ingestTimer)
-    this.ingestTimer = 0
     for (const off of this.detachers) off()
     this.detachers.length = 0
+    this.overridden.clear()
     this.engine.dispose()
     this.worker.dispose()
     this.grid.clear()

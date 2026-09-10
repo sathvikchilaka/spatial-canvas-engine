@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Session } from '@/app/session'
-import type { Rect } from '@/data/nodes'
+import { indexOfId, type Rect } from '@/data/nodes'
 import { createSyntheticDocument } from '@/data/synthetic/source'
 import { serializeGeneratedPage } from '@/data/synthetic/serialize'
 import { commit, redo, resetHistory, undo, useStore } from '@/store/store'
@@ -333,14 +333,30 @@ describe('spatial index synchronisation', () => {
       const from = { ...s.rectOf(id)! }
       const to = { x: 999, y: 998, w: 10, h: 10 }
 
+      // The cull grid is the main-thread half of the same seam: `updateNode`
+      // keeps the worker's QuadTree honest, `grid.move` keeps the draw loop's
+      // culling honest. Assert the entry actually relocates and comes back.
+      const idx = indexOfId(s.nodes, id)
+      const out = new Uint32Array(4096)
+      const inGrid = (r: Rect) => {
+        const n = s.grid.query(r.x, r.y, r.w, r.h, out)
+        for (let i = 0; i < n; i++) if (out[i] === idx) return true
+        return false
+      }
+      expect(inGrid(from)).toBe(true)
+      expect(inGrid(to)).toBe(false)
+
       commit('editBox', (d) => {
         d.edits[id] = { rect: to }
         d.dirtyAt[id] = Date.now()
       })
       expect(workerUpdates()).toEqual([{ nodeId: id, old: from, next: to }])
+      expect(inGrid(to)).toBe(true)
 
       undo()
       expect(workerUpdates()[1]).toEqual({ nodeId: id, old: to, next: from })
+      expect(inGrid(to)).toBe(false)
+      expect(inGrid(from)).toBe(true)
 
       redo()
       expect(workerUpdates()[2]).toEqual({ nodeId: id, old: from, next: to })

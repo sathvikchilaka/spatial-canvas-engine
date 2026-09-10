@@ -129,10 +129,12 @@ Zustand store (`src/store/store.ts`) plus Immer:
   override rejects further stream overwrites (`shielded++`), a clean node accepts them
   (`applied++`). `dirtyAt` marks "a human touched this node" for the FLAG_DIRTY paint and the
   status bar's counter, and a reading-order link sets it too; keying the geometry shield on it
-  froze a box's coordinates because its reading order had been repaired. This is deliberately taken over the
-  worker's typed arrays directly (`ids: Uint32Array`, `coords: Float32Array`) rather than a
-  `SerializedNode[]`, because building that array just to iterate it once would itself be a
-  main-thread allocation storm on a FUNSD-sized burst.
+  froze a box's coordinates because its reading order had been repaired. `applyPageUpdate`
+  deliberately takes the worker's typed arrays directly (`ids: Uint32Array`, world-space
+  `coords: Float32Array`) rather than a `SerializedNode[]`, because building that array just to
+  iterate it once would itself be a main-thread allocation storm on a FUNSD-sized burst. It reads
+  those arrays and writes nothing: with the human overlay bounded (next bullet), a clean node
+  needs no store entry, so the merge is purely a shielded/applied count.
 - **`edits` is the human overlay only**: `applyPageUpdate` no longer writes an `Edit` for a clean
   node that has none — that node's authoritative geometry is already in the render arrays and
   `Session.rectOf` falls back to them. An earlier version wrote `rect` for every incoming

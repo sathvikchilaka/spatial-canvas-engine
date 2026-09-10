@@ -536,7 +536,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - Consumes: `zoomAt(vp, sx, sy, factor)`, `panBy` from `@/engine/viewport`.
 - Produces: `export function pinchUpdate(prev: { dist: number; cx: number; cy: number }, a: {x: number; y: number}, b: {x: number; y: number}): { factor: number; cx: number; cy: number; dist: number }` in `src/engine/input.ts` — pure, so the gesture math is testable without a touchscreen.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 // tests/engine/pinch.test.ts
@@ -574,12 +574,12 @@ describe('pinchUpdate', () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `pnpm test -- tests/engine/pinch.test.ts`
 Expected: FAIL — `pinchUpdate` is not exported.
 
-- [ ] **Step 3: Implement in `src/engine/input.ts`**
+- [x] **Step 3: Implement in `src/engine/input.ts`**
 
 Add above `attachInput`:
 
@@ -656,16 +656,16 @@ In `onUp`, drop the pointer and end the pinch:
 
 Place those two lines first in `onUp`, before the existing capture-release block.
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `pnpm test && pnpm typecheck && pnpm lint`
 Expected: PASS.
 
-- [ ] **Step 5: Verify by hand**
+- [x] **Step 5: Verify by hand**
 
 Run: `pnpm dev`, open on a trackpad and (if available) a touchscreen. Two-finger spread zooms about the midpoint; two-finger drag pans; single-finger drag still pans; `ctrl`+wheel still zooms. Zoom still clamps at 10% and 500% (status bar shows the percentage).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/engine/input.ts tests/engine/pinch.test.ts
@@ -690,7 +690,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 **Interfaces:**
 - Produces: `Edit = { rect?: Rect; label?: string }`. **Note for the table-mesh plan** (`plans/2026_09_10_feature-table-mesh-corrector-plan.md`), which re-introduces `deleted` *with* a consumer: if that plan lands first, skip this file's `Edit` change and keep the field.
 
-- [ ] **Step 1: Remove the unconsumed field**
+- [x] **Step 1: Remove the unconsumed field**
 
 In `src/store/store.ts`, `Edit` becomes:
 
@@ -702,7 +702,7 @@ export type Edit = {
 }
 ```
 
-- [ ] **Step 2: Update ARCHITECTURE.md**
+- [x] **Step 2: Update ARCHITECTURE.md**
 
 In §3, replace the `updateNode` sentence with:
 
@@ -726,12 +726,12 @@ because its reading order had been repaired.
 
 In §8, delete the "FUNSD raster decode…" bullet only if Task 5 of the submission-readiness plan has already verified it; otherwise leave §8 alone apart from removing any claim this plan invalidates.
 
-- [ ] **Step 3: Run everything**
+- [x] **Step 3: Run everything**
 
 Run: `pnpm test && pnpm typecheck && pnpm lint`
 Expected: PASS, 135+ tests.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/store/store.ts ARCHITECTURE.md

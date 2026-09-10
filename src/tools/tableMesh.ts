@@ -46,31 +46,14 @@ function emptyMesh(): Mesh {
   return { rows: [], cols: [], bounds: { x: 0, y: 0, w: 0, h: 0 }, cells: [] }
 }
 
-function median(values: number[]): number {
-  const s = [...values].sort((a, b) => a - b)
-  const mid = s.length >> 1
-  return s.length % 2 === 1 ? s[mid] : (s[mid - 1] + s[mid]) / 2
-}
-
 /**
- * Bands are *occupancy intervals*: a new band starts only across a genuinely empty
- * gap, so two cells in the same column misaligned by any amount still overlap and
- * stay one band. No tolerance constant is involved.
- *
- * Cells wider than 1.5x the median extent are set aside first — a cell spanning two
- * bands must not merge them. (If every extent is excluded we fall back to all of them.)
- *
- * Documented limitation: cells sharing an *exact* edge (a table with no insets) touch,
- * so they land in one band. The synthetic generator always emits a 6px inset, so real
- * input separates cleanly.
+ * Merges extents into occupancy intervals: a new interval starts only across a
+ * genuinely empty gap, so two extents that overlap at all — however slightly —
+ * stay in one interval. No tolerance constant is involved.
  */
-function bandsOf(extents: Extent[]): Band[] {
+function occupancy(extents: Extent[]): Band[] {
   if (extents.length === 0) return []
-  const med = median(extents.map((e) => e.hi - e.lo))
-  const kept = extents.filter((e) => e.hi - e.lo <= med * 1.5)
-  const use = kept.length > 0 ? kept : extents
-
-  const sorted = [...use].sort((a, b) => a.lo - b.lo)
+  const sorted = [...extents].sort((a, b) => a.lo - b.lo)
   const bands: Band[] = [{ lo: sorted[0].lo, hi: sorted[0].hi }]
   for (let i = 1; i < sorted.length; i++) {
     const cur = bands[bands.length - 1]
@@ -79,6 +62,59 @@ function bandsOf(extents: Extent[]): Band[] {
     else if (sorted[i].hi > cur.hi) cur.hi = sorted[i].hi
   }
   return bands
+}
+
+/**
+ * Tries to split one occupancy interval. Finds the extents that *cover* it —
+ * span essentially its whole width — and removes them; if what remains still
+ * spans the full interval (no gap revealed), the covering extents were not
+ * bridging anything and the interval is genuine, so it is kept whole. If the
+ * remaining extents' own occupancy breaks into two or more sub-intervals, the
+ * covering extents were bridging a real gap: recurse on each sub-interval,
+ * built only from the (strictly smaller) remaining set so recursion always
+ * terminates.
+ *
+ * "Covers essentially the whole interval" uses a small relative allowance,
+ * not exact equality: real extraction geometry has sub-pixel slop, so an
+ * extent that is the interval's true covering column/row may miss the
+ * interval's exact lo/hi by a fraction of a pixel. Exact equality would treat
+ * that as "not covering" and misclassify an ordinary wide column as a split.
+ */
+function splitInterval(interval: Band, extents: Extent[]): Band[] {
+  const width = interval.hi - interval.lo
+  const eps = width * 1e-6
+  const inInterval = extents.filter(
+    (e) => e.lo < interval.hi && e.hi > interval.lo
+  )
+  const covering = inInterval.filter(
+    (e) => e.lo <= interval.lo + eps && e.hi >= interval.hi - eps
+  )
+  if (covering.length === 0) return [interval]
+
+  const remaining = inInterval.filter((e) => !covering.includes(e))
+  if (remaining.length === 0) return [interval]
+
+  const subBands = occupancy(remaining)
+  if (subBands.length < 2) return [interval]
+
+  return subBands.flatMap((b) => splitInterval(b, remaining))
+}
+
+/**
+ * Bands are occupancy intervals, recursively split wherever a covering extent
+ * turns out to be bridging a real gap between other extents (see
+ * `splitInterval`). A cell spanning two bands is distinguished from a
+ * genuinely wide cell structurally — by whether removing it reveals an
+ * interior gap — never by comparing widths.
+ *
+ * Documented limitation: cells sharing an *exact* edge (a table with no insets) touch,
+ * so they land in one band. The synthetic generator always emits a 6px inset, so real
+ * input separates cleanly.
+ */
+function bandsOf(extents: Extent[]): Band[] {
+  if (extents.length === 0) return []
+  const top = occupancy(extents)
+  return top.flatMap((b) => splitInterval(b, extents))
 }
 
 /** Outer edges of the outermost bands, interior lines midway between bands. */

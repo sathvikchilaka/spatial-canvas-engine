@@ -176,6 +176,92 @@ describe("buildMesh", () => {
     expect(m.cols).toEqual([])
     expect(m.bounds).toEqual({ x: 0, y: 0, w: 0, h: 0 })
   })
+
+  it("keeps a genuinely wide column as its own band, distinct from its neighbours", () => {
+    // col1 [0,50], col2 [60,110], col3 [120,270] — col3 is 3x wider than the
+    // others but does not bridge a gap between any other extents, so it must
+    // stay its own band rather than being excluded and swallowed into col2's.
+    const cells: CellInput[] = [
+      { id: 1, x: 0, y: 0, w: 50, h: 20 },
+      { id: 2, x: 60, y: 0, w: 50, h: 20 },
+      { id: 3, x: 120, y: 0, w: 150, h: 20 },
+    ]
+    const m = buildMesh(cells)
+    expectMonotonic(m)
+    expect(m.cols).toHaveLength(4)
+    const c2 = m.cells.find((c) => c.id === 2)!
+    const c3 = m.cells.find((c) => c.id === 3)!
+    expect(c2.col).not.toBe(c3.col)
+    // lines = [0, 55, 115, 270]: dividers sit midway between neighbouring bands,
+    // so col3's true rect starts at 115 (midpoint of the 110..120 gap), not at
+    // its own raw x of 120.
+    expect(cellRect(m, c3)).toEqual({ x: 115, y: 0, w: 155, h: 20 })
+  })
+
+  it("distinguishes a wide column from a cell that actually spans two bands", () => {
+    // Same wide col3 as above, plus a cell (id 4) that genuinely spans col1+col2.
+    // The spanning cell must be removed and the col1/col2 divider restored; the
+    // wide col3 must still stand alone.
+    const cells: CellInput[] = [
+      { id: 1, x: 0, y: 0, w: 50, h: 20 },
+      { id: 2, x: 60, y: 0, w: 50, h: 20 },
+      { id: 3, x: 120, y: 0, w: 150, h: 20 },
+      { id: 4, x: 0, y: 0, w: 110, h: 20 },
+    ]
+    const m = buildMesh(cells)
+    expectMonotonic(m)
+    expect(m.cols).toHaveLength(4)
+    const c1 = m.cells.find((c) => c.id === 1)!
+    const c3 = m.cells.find((c) => c.id === 3)!
+    const c4 = m.cells.find((c) => c.id === 4)!
+    expect(c4.colSpan).toBe(2)
+    expect(c4.col).toBe(c1.col)
+    expect(c3.colSpan).toBe(1)
+    expect(c3.col).not.toBe(c4.col)
+    expect(cellRect(m, c3)).toEqual({ x: 115, y: 0, w: 155, h: 20 })
+  })
+
+  it("recovers nested bands under two levels of spanning cells", () => {
+    // Four narrow columns A[0,10] B[20,30] C[40,50] D[60,70]. A top-level cell
+    // (id 5) spans all four; a second cell (id 6) nested inside that range spans
+    // only B+C. Splitting must recurse: removing id5 reveals [0,10],[20,50],[60,70],
+    // and removing id6 from the middle interval reveals [20,30] and [40,50].
+    const cells: CellInput[] = [
+      { id: 1, x: 0, y: 0, w: 10, h: 20 },
+      { id: 2, x: 20, y: 0, w: 10, h: 20 },
+      { id: 3, x: 40, y: 0, w: 10, h: 20 },
+      { id: 4, x: 60, y: 0, w: 10, h: 20 },
+      { id: 5, x: 0, y: 0, w: 70, h: 20 },
+      { id: 6, x: 20, y: 0, w: 30, h: 20 },
+    ]
+    const m = buildMesh(cells)
+    expectMonotonic(m)
+    expect(m.cols).toHaveLength(5)
+    expect(m.cols).toEqual([0, 15, 35, 55, 70])
+    const spanAll = m.cells.find((c) => c.id === 5)!
+    const spanMid = m.cells.find((c) => c.id === 6)!
+    expect(spanAll.colSpan).toBe(4)
+    expect(spanAll.col).toBe(0)
+    expect(spanMid.colSpan).toBe(2)
+    expect(spanMid.col).toBe(1)
+  })
+
+  it("bounds contain every input cell with wide and spanning cells present", () => {
+    const cells: CellInput[] = [
+      { id: 1, x: 0, y: 0, w: 50, h: 20 },
+      { id: 2, x: 60, y: 0, w: 50, h: 20 },
+      { id: 3, x: 120, y: 0, w: 150, h: 20 },
+      { id: 4, x: 0, y: 0, w: 110, h: 20 },
+    ]
+    const m = buildMesh(cells)
+    expectMonotonic(m)
+    for (const c of cells) {
+      expect(m.bounds.x).toBeLessThanOrEqual(c.x)
+      expect(m.bounds.y).toBeLessThanOrEqual(c.y)
+      expect(m.bounds.x + m.bounds.w).toBeGreaterThanOrEqual(c.x + c.w)
+      expect(m.bounds.y + m.bounds.h).toBeGreaterThanOrEqual(c.y + c.h)
+    }
+  })
 })
 
 describe("cellRect", () => {

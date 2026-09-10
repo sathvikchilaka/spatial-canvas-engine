@@ -92,12 +92,15 @@ export class OrderTool implements Tool {
   }
 
   /**
-   * `dragFrom` is set asynchronously inside `pick().then()`, so it is never
-   * true at `onPointerDown` return time — the adapter's `claimed` check reads
-   * this getter before that promise resolves. Because of that, `onUp` is
-   * never gated in from the app today (pre-existing; link commits are
-   * unreachable that way), so `dragFrom` must be cleared elsewhere: see
-   * `reset()`.
+   * Two paths set this true, on different clocks. `dragFrom` (link gesture) is
+   * set asynchronously inside `pick().then()`, so it is NOT true at
+   * `onPointerDown` return time — the adapter reads `capturing` again at
+   * pointer-up, by which point the promise has resolved, so `dragFrom` must be
+   * cleared explicitly on teardown; see `reset()`. `reparent` (endpoint drag)
+   * is set synchronously inside `onPointerDown` itself — grabbing a live arrow
+   * endpoint is detected without a `pick()` round-trip — and is cleared
+   * synchronously at the top of `onPointerUp`, before the async `pick().then()`
+   * that resolves the commit.
    */
   get capturing(): boolean {
     return this.reparent !== null || this.dragFrom !== null
@@ -168,8 +171,13 @@ export class OrderTool implements Tool {
       if (to !== null && to !== from) {
         const exists = this.deps.hasEdge(from, to)
         commit(exists ? 'unlink' : 'link', (d) => {
-          if (exists) d.edgesRemoved = [...d.edgesRemoved, [from, to]]
-          else d.edgesAdded = [...d.edgesAdded, [from, to]]
+          if (exists) {
+            d.edgesAdded = d.edgesAdded.filter(([f, t]) => !(f === from && t === to))
+            d.edgesRemoved = [...d.edgesRemoved, [from, to]]
+          } else {
+            d.edgesRemoved = d.edgesRemoved.filter(([f, t]) => !(f === from && t === to))
+            d.edgesAdded = [...d.edgesAdded, [from, to]]
+          }
           d.dirtyAt[from] = Date.now()
         })
       }
@@ -191,6 +199,12 @@ export class OrderTool implements Tool {
     if (next[0] === from && next[1] === to) return
 
     commit('reparent', (d) => {
+      // Removing [from,to] may undo a pair a prior gesture added, and adding
+      // `next` may resurrect a pair a prior gesture removed (drag an edge away
+      // then back to its original target). Prune the opposing list both ways so
+      // materialize's drop set never vetoes an edge a later gesture restores.
+      d.edgesAdded = d.edgesAdded.filter(([f, t]) => !(f === from && t === to))
+      d.edgesRemoved = d.edgesRemoved.filter(([f, t]) => !(f === next[0] && t === next[1]))
       d.edgesRemoved = [...d.edgesRemoved, [from, to]]
       d.edgesAdded = [...d.edgesAdded, next]
       d.dirtyAt[next[0]] = Date.now()

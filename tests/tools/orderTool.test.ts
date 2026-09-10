@@ -310,6 +310,59 @@ describe('OrderTool re-parenting', () => {
     expect(useStore.getState().edgesAdded).toEqual([])
   })
 
+  it('restores the edge after a re-parent is dragged away and back (materialize does not drop it forever)', async () => {
+    // Base graph 1 -> 2. Use a mutable arrows list so each gesture sees the
+    // arrow the previous gesture actually produced.
+    const nodes = createNodeArrays(3)
+    pushNode(nodes, { id: 1, page: 0, x: 0, y: 0, w: 10, h: 10, type: NodeType.Paragraph, parent: -1, order: 0 })
+    pushNode(nodes, { id: 2, page: 0, x: 100, y: 0, w: 10, h: 10, type: NodeType.Paragraph, parent: -1, order: 1 })
+    pushNode(nodes, { id: 3, page: 0, x: 200, y: 0, w: 10, h: 10, type: NodeType.Paragraph, parent: -1, order: 2 })
+    const base = createEdgeSet()
+    appendEdges(base, Int32Array.of(1, 2))
+
+    const isEdgePresent = (from: number, to: number) => {
+      const s = useStore.getState()
+      const g = materialize(base, s.edgesAdded, s.edgesRemoved, nodes)
+      const targets = g.adjacency.get(indexOfId(nodes, from))
+      return !!targets && targets.includes(to)
+    }
+
+    let currentArrows: ArrowRecord[] = [{ from: 1, to: 2, x1: 20, y1: 5, x2: 100, y2: 5 }]
+    const makeTool = (pickResult: number | null) =>
+      new OrderTool({
+        getRect: (id) => RECTS[id] ?? null,
+        pick: async () => pickResult,
+        requestDraw: () => {},
+        hasEdge: () => true,
+        arrows: () => ({ list: currentArrows, count: currentArrows.length }),
+      })
+
+    expect(isEdgePresent(1, 2)).toBe(true)
+
+    // Drag the head from 2 onto 3: graph becomes 1 -> 3.
+    const toAway = makeTool(3)
+    toAway.onPointerDown(ev(100, 5))
+    await Promise.resolve()
+    toAway.onPointerUp(ev(200, 5))
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(isEdgePresent(1, 2)).toBe(false)
+    expect(isEdgePresent(1, 3)).toBe(true)
+
+    // Now the painted arrow is 1 -> 3; drag its head back onto 2.
+    currentArrows = [{ from: 1, to: 3, x1: 20, y1: 5, x2: 200, y2: 5 }]
+    const toBack = makeTool(2)
+    toBack.onPointerDown(ev(200, 5))
+    await Promise.resolve()
+    toBack.onPointerUp(ev(100, 5))
+    await Promise.resolve()
+    await Promise.resolve()
+
+    // The edge must be restored, not permanently vetoed by edgesRemoved.
+    expect(isEdgePresent(1, 2)).toBe(true)
+    expect(isEdgePresent(1, 3)).toBe(false)
+  })
+
   it('still links two nodes when the press is not on an endpoint', async () => {
     const tool = new OrderTool({
       getRect: (id) => RECTS[id] ?? null,

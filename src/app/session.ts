@@ -435,6 +435,8 @@ export class Session {
   private subscribeSelection(): () => void {
     let prevSelected = -1
     let prevEdits: AppState['edits'] | null = null
+    let prevEdgesAdded: AppState['edgesAdded'] | null = null
+    let prevEdgesRemoved: AppState['edgesRemoved'] | null = null
     return useStore.subscribe((state) => {
       if (prevSelected >= 0) this.nodes.flags[prevSelected] &= ~FLAG_SELECTED
       const i = state.selectedId === null ? -1 : indexOfId(this.nodes, state.selectedId)
@@ -476,7 +478,16 @@ export class Session {
         prevEdits = state.edits
         if (editsChanged && tableActive) void this.tableTool.adopt(this.tableTool.tableId)
       }
-      this.orderDirty = true
+      // `sequenceNumbers` is a DFS walk — it must run on a real graph change
+      // only, not on every store write. `edgesAdded`/`edgesRemoved` are always
+      // replaced via spread in commit recipes (never mutated in place), so
+      // identity comparison catches every real change and nothing else, same
+      // pattern as `editsChanged` above.
+      if (state.edgesAdded !== prevEdgesAdded || state.edgesRemoved !== prevEdgesRemoved) {
+        prevEdgesAdded = state.edgesAdded
+        prevEdgesRemoved = state.edgesRemoved
+        this.orderDirty = true
+      }
       this.engine.requestDraw()
     })
   }

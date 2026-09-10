@@ -99,6 +99,7 @@ export class Session {
     done: false,
     transport: 'replay' as 'sse' | 'replay',
     failed: 0,
+    nodeCount: 0,
   }
   private onStatusChange: (() => void) | null = null
 
@@ -317,6 +318,7 @@ export class Session {
     const r = applyPageUpdate(p.pageIndex, p.ids, p.coords)
     if (isNewPage) this.status.pagesReceived++
     this.status.shielded += r.shielded
+    this.status.nodeCount = this.nodes.count
     this.onStatusChange?.()
     this.engine.requestDraw()
   }

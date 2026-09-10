@@ -68,6 +68,10 @@ export function App() {
         w.__bench = (opts?: unknown) => benchPan(session, opts as never)
         w.__pick = (samples?: number) => benchPick(session, samples)
         w.__ingest = () => ingestReport()
+        // Read-only status for the e2e suite — the same object the status bar renders.
+        w.__status = () => session.status
+        // Read-only edit map, so the suite can assert undo/redo without reading the DOM.
+        w.__edits = () => useStore.getState().edits
       }
       setNodes(session.nodes)
 
@@ -145,6 +149,8 @@ export function App() {
       w.__bench = null
       w.__pick = null
       w.__ingest = null
+      w.__status = null
+      w.__edits = null
       setNodes(null)
       setStream({
         pagesReceived: 0,

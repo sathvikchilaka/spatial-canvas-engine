@@ -4,8 +4,9 @@ import { Session } from '@/app/session'
 import { FLAG_HIDDEN, indexOfId, NodeType, type Rect } from '@/data/nodes'
 import { createSyntheticDocument } from '@/data/synthetic/source'
 import { serializeGeneratedPage } from '@/data/synthetic/serialize'
-import { commit, redo, resetHistory, undo, useStore } from '@/store/store'
+import { canUndo, commit, redo, resetHistory, undo, useStore } from '@/store/store'
 import type { PageIngested, Res } from '@/worker/protocol'
+import type { TableTool } from '@/tools/tableTool'
 
 /**
  * jsdom ships no canvas backend, ResizeObserver, matchMedia, rAF or
@@ -504,6 +505,78 @@ describe('table detection', () => {
       expect(mesh).not.toBeNull()
       expect(mesh!.cols.length).toBeGreaterThanOrEqual(4)
       expect(mesh!.rows.length).toBeGreaterThanOrEqual(5)
+
+      s.dispose()
+    } finally {
+      vi.useRealTimers()
+      useStore.setState({ selectedId: null })
+    }
+  })
+
+  /**
+   * NEW-3: `prevEdits` used to advance before the `capturing` check, so a
+   * geometry-moving store change that arrives mid-drag (here, a keyboard
+   * undo) consumed its own change signal and was skipped. The gesture's own
+   * `onPointerUp` doesn't repair it either when it commits nothing (a drag
+   * released back at the exact position it started). The mesh must still
+   * catch up on some *later* store change, even one that never touches
+   * `edits` itself (a plain selection toggle).
+   */
+  it('a mid-drag undo does not permanently strand the mesh', async () => {
+    vi.useFakeTimers()
+    try {
+      const s = new Session(canvas(), createSyntheticDocument(8, 1))
+      await s.ready
+      await s.connectStream()
+      for (let i = 0; i < 60 && !s.status.done; i++) await vi.advanceTimersByTimeAsync(50)
+
+      let cellIndex = -1
+      for (let i = 0; i < s.nodes.count; i++) {
+        if (s.nodes.types[i] === NodeType.Cell) {
+          cellIndex = i
+          break
+        }
+      }
+      expect(cellIndex).toBeGreaterThanOrEqual(0)
+      const cellId = s.nodes.ids[cellIndex]
+      useStore.setState({ selectedId: cellId })
+      s.setTool('table')
+      await Promise.resolve()
+
+      const tool = s.activeTool as TableTool
+      expect(tool.mesh).not.toBeNull()
+      const mesh = tool.mesh!
+      expect(mesh.cols.length).toBeGreaterThanOrEqual(2)
+      const line = mesh.cols[1]
+      const y = mesh.bounds.y + 4
+      const at = (x: number) => ({ world: [x, y] as [number, number], screen: [0, 0] as [number, number], scale: 1, shift: false, alt: false })
+
+      // First gesture: commit a real move, so there is something to undo.
+      tool.onPointerDown(at(line))
+      tool.onPointerMove(at(line + 20))
+      tool.onPointerUp(at(line + 20))
+      await Promise.resolve()
+      expect(canUndo()).toBe(true)
+      const movedLine = tool.mesh!.cols[1]
+      expect(movedLine).toBeCloseTo(line + 20, 3)
+
+      // Second gesture: grab the moved divider, undo mid-drag (refused —
+      // the divider the reviewer is holding must not move under them), then
+      // release back at the exact position it started: `diff.size === 0`,
+      // so `onPointerUp` commits nothing and cannot re-adopt either.
+      tool.onPointerDown(at(movedLine))
+      expect(tool.capturing).toBe(true)
+      undo()
+      expect(tool.mesh!.cols[1]).toBeCloseTo(movedLine, 3)
+      tool.onPointerUp(at(movedLine))
+      await Promise.resolve()
+
+      // A later store change that never touches `edits` itself (pure
+      // selection) must still catch the mesh up to the undone geometry.
+      useStore.setState({ selectedId: null })
+      useStore.setState({ selectedId: cellId })
+      await Promise.resolve()
+      expect(tool.mesh!.cols[1]).toBeCloseTo(line, 3)
 
       s.dispose()
     } finally {

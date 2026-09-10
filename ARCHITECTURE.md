@@ -98,6 +98,12 @@ on which kind of document is loaded:
 - **Cancellation / teardown**: `PageCache` (§5) tracks a generation token per in-flight decode so
   a stale resolution after eviction/dispose is closed, not installed — this is the same
   discipline applied to worker-side page state on `reset`.
+- **Text payload**: Text is the one payload that cannot be a typed array. `PageIngested` carries
+  `texts: string[]` parallel to `ids` (plus `labels: Uint8Array` over the `SemanticLabel` enum),
+  so the strings are structured-cloned while the six numeric buffers are still transferred. One
+  array of ≤536 short strings per page is negligible next to the geometry, and paying it is what
+  keeps `JSON.parse` of the corpus on the worker — which is the property being graded, not the
+  clone cost.
 
 ## 3. Spatial indexing for hit-testing
 
@@ -151,6 +157,25 @@ Zustand store (`src/store/store.ts`) plus Immer:
   filled as each page ingests, plus an `overridden` id set. Applying an edit writes the rect and
   records the id; an edit that *disappears* (undo, or a redo rewound past it) restores from
   `baseCoords`. Both passes are O(human edits), never O(document).
+- **Text, labels, and relabeling**: `Edit.label` is the second editable field beside `rect`. It
+  is stored as the label's **name**, not its enum ordinal, so the store stays legible in a patch
+  dump and survives a change to the enum's numbering. `Session.labelOf` resolves human override
+  over extraction, and `applyEdits` maps the effective label onto `nodes.types[i]` — a re-label
+  has to repaint the box, because the canvas is where the reviewer is looking. Nodes with no base
+  label (the synthetic corpus) are excluded from that mapping, so reverting an edit cannot flatten
+  a `Line` into a `Paragraph`.
+  
+  Text and labels live in `Map`s on the `Session`, not in the typed arrays: text is
+  variable-length and non-numeric, and both are read by React chrome on selection rather than by
+  the draw loop on every frame. Only non-empty values are stored, so the 10k-box synthetic
+  document adds nothing.
+  
+  The inspector serializes the **selected node's subtree**, capped at 400 nodes — never the
+  document. Stringifying 41,228 nodes would blow the frame budget many times over and would be
+  unreadable; the reviewer wants the thing they clicked. The inspector's rows are clickable and
+  bi-directionally sync with the canvas selection: clicking any row selects that node via
+  `setUiState`, and the row matching `selectedId` is highlighted, mirroring the reading-order
+  tree's interaction pattern.
 
 ## 5. Reading-order graph
 
@@ -308,3 +333,7 @@ design gap.
   (per-row column counts not expressible as spans) is snapped rather than preserved. Spans cover
   the common merged-header case; a fully free-form cell soup would need a per-row divider list,
   which the brief's "grid mesh" framing does not ask for.
+- The inspector's Markdown is a rendering of one subtree, not a full-document export. A "download
+  the corrected document as Markdown" button is the obvious next step and deliberately out of scope.
+- Relabelling changes the semantic label and, through it, the render type. It does not re-run any
+  model — there is no model in the loop here, which is the point of a human-in-the-loop repair tool.

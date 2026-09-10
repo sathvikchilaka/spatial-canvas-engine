@@ -1,14 +1,27 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
+import { Badge } from "@/components/ui/badge"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { ASSIGNABLE, labelFromName, labelName } from "@/data/labels"
 import { NodeType, indexOfId, type NodeArrays } from "@/data/nodes"
 import { cn } from "@/lib/utils"
 import { setUiState, useStore } from "@/store/store"
+import { SemanticLabel } from "@/worker/protocol"
+
+export type RowMeta = {
+  textOf(id: number): string
+  labelOf(id: number): SemanticLabel
+}
 
 export type TreeRow = {
   id: number
   depth: number
   type: NodeType
-  label: string
+  /** Type-and-id fallback, e.g. "Line 1042". Always present. */
+  title: string
+  /** Extracted text, `''` when the source has none. */
+  text: string
+  label: SemanticLabel
   hasChildren: boolean
 }
 
@@ -24,7 +37,11 @@ const TYPE_LABEL: Record<number, string> = {
 }
 
 /** Flattens the node hierarchy to the rows currently revealed. */
-export function buildTreeRows(nodes: NodeArrays, expanded: Set<number>): TreeRow[] {
+export function buildTreeRows(
+  nodes: NodeArrays,
+  expanded: Set<number>,
+  meta?: RowMeta,
+): TreeRow[] {
   // `parents[i]` holds the parent's *id* (the wire shape), not its row index.
   const childrenOf = new Map<number, number[]>()
   const roots: number[] = []
@@ -47,7 +64,9 @@ export function buildTreeRows(nodes: NodeArrays, expanded: Set<number>): TreeRow
       id,
       depth,
       type: nodes.types[index] as NodeType,
-      label: `${TYPE_LABEL[nodes.types[index]] ?? "Node"} ${id}`,
+      title: `${TYPE_LABEL[nodes.types[index]] ?? "Node"} ${id}`,
+      text: meta?.textOf(id) ?? "",
+      label: meta?.labelOf(id) ?? SemanticLabel.None,
       hasChildren: !!kids?.length,
     })
     if (!kids || !expanded.has(id)) return
@@ -62,13 +81,15 @@ type Props = {
   /** Bumped by the session when the document changes, to rebuild rows. */
   version: number
   onFocus(id: number): void
+  meta?: RowMeta
+  onRelabel?(id: number, label: SemanticLabel): void
 }
 
 /**
  * Hand-virtualized: 10k rows of DOM would reintroduce the very bottleneck the
  * canvas exists to avoid.
  */
-export function TreeView({ nodes, version, onFocus }: Props) {
+export function TreeView({ nodes, version, onFocus, meta, onRelabel }: Props) {
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set())
   const [scrollTop, setScrollTop] = useState(0)
   const [height, setHeight] = useState(600)
@@ -79,8 +100,8 @@ export function TreeView({ nodes, version, onFocus }: Props) {
   const hoveredId = useStore((s) => s.hoveredId)
 
   const rows = useMemo(
-    () => (nodes ? buildTreeRows(nodes, expanded) : []),
-    [nodes, expanded, version],
+    () => (nodes ? buildTreeRows(nodes, expanded, meta) : []),
+    [nodes, expanded, version, meta],
   )
 
   useEffect(() => {
@@ -194,12 +215,42 @@ export function TreeView({ nodes, version, onFocus }: Props) {
                 ) : (
                   <span className="w-3" aria-hidden />
                 )}
-                <span className="truncate">{row.label}</span>
+                <span className="truncate text-sm">{row.text || row.title}</span>
+                {row.label !== SemanticLabel.None && row.label !== SemanticLabel.Word ? (
+                  <Badge
+                    variant="secondary"
+                    className="ml-auto shrink-0 text-[10px] uppercase tracking-wider"
+                  >
+                    {labelName(row.label)}
+                  </Badge>
+                ) : null}
               </button>
             )
           })}
         </div>
       </div>
+      {selectedId !== null && onRelabel ? (
+        <div className="flex items-center gap-2 border-t border-border px-3 py-2">
+          <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            Label
+          </span>
+          <Select
+            value={labelName(meta?.labelOf(selectedId) ?? SemanticLabel.None)}
+            onValueChange={(v) => onRelabel(selectedId, labelFromName(v))}
+          >
+            <SelectTrigger className="h-7 w-32 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {ASSIGNABLE.map((l) => (
+                <SelectItem key={l} value={labelName(l)} className="text-xs">
+                  {labelName(l)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      ) : null}
     </aside>
   )
 }

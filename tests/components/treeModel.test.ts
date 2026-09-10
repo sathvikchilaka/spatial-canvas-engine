@@ -2,6 +2,7 @@
 import { describe, it, expect } from 'vitest'
 import { buildTreeRows } from '@/components/TreeView'
 import { createNodeArrays, pushNode, NodeType } from '@/data/nodes'
+import { SemanticLabel } from '@/worker/protocol'
 
 // `parent` is the parent's id (node 1), not its array index.
 function tree() {
@@ -31,5 +32,34 @@ describe('buildTreeRows', () => {
 
   it('handles an empty document', () => {
     expect(buildTreeRows(createNodeArrays(4), new Set())).toEqual([])
+  })
+})
+
+describe('row text', () => {
+  it('shows the extracted text when there is some', () => {
+    const nodes = tree()
+    const rows = buildTreeRows(nodes, new Set([1]), {
+      textOf: (id) => (id === 2 ? 'Name of company' : ''),
+      labelOf: () => SemanticLabel.Question,
+    })
+    const row = rows.find((r) => r.id === 2)!
+    expect(row.text).toBe('Name of company')
+    expect(row.label).toBe(SemanticLabel.Question)
+  })
+
+  it('falls back to the type-and-id title when text is empty', () => {
+    const nodes = tree()
+    const rows = buildTreeRows(nodes, new Set(), {
+      textOf: () => '',
+      labelOf: () => SemanticLabel.None,
+    })
+    expect(rows[0].text).toBe('')
+    expect(rows[0].title).toMatch(/\d+$/)
+  })
+
+  it('works with no meta at all, as it did before', () => {
+    const rows = buildTreeRows(tree(), new Set())
+    expect(rows[0].text).toBe('')
+    expect(rows[0].label).toBe(SemanticLabel.None)
   })
 })

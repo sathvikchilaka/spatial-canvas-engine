@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 import { benchPan, benchPick } from "@/app/bench"
 import { ingestReport, markStreamDone, startIngestProbe, stopIngestProbe } from "@/app/ingestProbe"
@@ -9,9 +9,11 @@ import { Toolbar, type ToolName } from "@/components/Toolbar"
 import { TreeView } from "@/components/TreeView"
 import { Button } from "@/components/ui/button"
 import { createFunsdDocument } from "@/data/funsd/source"
+import { ASSIGNABLE } from "@/data/labels"
 import type { NodeArrays } from "@/data/nodes"
 import { createSyntheticDocument } from "@/data/synthetic/source"
 import { canRedo, canUndo, redo, resetHistory, undo, useStore } from "@/store/store"
+import { SemanticLabel } from "@/worker/protocol"
 
 export function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -27,6 +29,13 @@ export function App() {
   const [tool, setTool] = useState<ToolName>("select")
   const [docId, setDocId] = useState<DocumentId>("funsd")
   const selectedId = useStore((s) => s.selectedId)
+  const treeMeta = useMemo(
+    () => ({
+      textOf: (id: number) => sessionRef.current?.textOf(id) ?? "",
+      labelOf: (id: number) => sessionRef.current?.labelOf(id) ?? SemanticLabel.None,
+    }),
+    [],
+  )
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -100,9 +109,18 @@ export function App() {
       const k = e.key.toLowerCase()
       const next: ToolName | null =
         k === "v" ? "select" : k === "o" ? "order" : k === "t" ? "table" : null
-      if (!next) return
-      setTool(next)
-      sessionRef.current?.setTool(next)
+      if (next) {
+        setTool(next)
+        sessionRef.current?.setTool(next)
+        return
+      }
+      // 1–4 relabel the selection: the fast path for bulk correction.
+      const digit = "1234".indexOf(e.key)
+      if (digit >= 0) {
+        const sel = useStore.getState().selectedId
+        if (sel !== null) sessionRef.current?.setLabel(sel, ASSIGNABLE[digit])
+        return
+      }
     }
     window.addEventListener("keydown", onToolKey)
 
@@ -160,6 +178,8 @@ export function App() {
           nodes={nodes}
           version={stream.pagesReceived}
           onFocus={(id) => sessionRef.current?.focusNode(id)}
+          meta={treeMeta}
+          onRelabel={(id, label) => sessionRef.current?.setLabel(id, label)}
         />
         <div className="relative min-h-0 flex-1">
           <canvas ref={canvasRef} className="block h-full w-full touch-none" />

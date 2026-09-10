@@ -13,6 +13,13 @@ const toEvent = (p: WorldPointer, scale: number): ToolEvent => ({
 /**
  * Adapts a Tool to the input layer. `onDown` returns true when the tool claims
  * the gesture, which suppresses the pan fallback.
+ *
+ * Pointer *moves* are forwarded whether or not the tool claimed anything, so a
+ * tool can render a pre-grab affordance under an idle cursor (the table tool's
+ * divider highlight). Every tool's `onPointerMove` already returns immediately
+ * unless it holds a gesture, and the input layer swallows moves while panning,
+ * so an unclaimed move can only ever update hover state. `onUp` stays gated:
+ * only the tool that claimed the gesture may terminate and commit it.
  */
 export function toolHandlers(tool: Tool, engine: CanvasEngine): ToolHandlers {
   let claimed = false
@@ -23,7 +30,6 @@ export function toolHandlers(tool: Tool, engine: CanvasEngine): ToolHandlers {
       return claimed
     },
     onMove(p) {
-      if (!claimed) return
       tool.onPointerMove(toEvent(p, engine.viewport.scale))
     },
     onUp(p) {

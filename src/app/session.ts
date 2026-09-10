@@ -1,4 +1,4 @@
-import { createNodeArrays, FLAG_DIRTY, FLAG_SELECTED, indexOfId, pushNode, type NodeArrays, type NodeType, type Rect } from '@/data/nodes'
+import { createNodeArrays, FLAG_DIRTY, FLAG_SELECTED, indexOfId, NodeType, pushNode, type NodeArrays, type Rect } from '@/data/nodes'
 import type { DocumentSource } from '@/data/document'
 import type { PageGeometry } from '@/data/geometry'
 import { BucketGrid } from '@/engine/bucketGrid'
@@ -9,6 +9,7 @@ import { redo, undo, useStore } from '@/store/store'
 import { toolHandlers } from '@/tools/adapter'
 import { OrderTool } from '@/tools/orderTool'
 import { SelectTool } from '@/tools/selectTool'
+import { TableTool, type TableSnapshot } from '@/tools/tableTool'
 import { OrderOverlay } from '@/engine/layers/overlays'
 import { appendEdges, createEdgeSet, hasEdge, materialize, type EdgeSet } from '@/data/edges'
 import type { Tool } from '@/tools/types'
@@ -18,6 +19,9 @@ import { WorkerClient } from '@/worker/client'
 import type { PageIngested } from '@/worker/protocol'
 
 const WORLD: Rect = { x: -2000, y: -2000, w: 20000, h: 400000 }
+
+/** The tools the UI can select. Mirrors `ToolName` in the toolbar. */
+export type ToolKind = 'select' | 'order' | 'table'
 
 /**
  * Owns the whole non-React runtime: engine, worker, grid, tools. React
@@ -38,9 +42,10 @@ export class Session {
   private readonly detachers: (() => void)[] = []
   private readonly selectTool: SelectTool
   private readonly orderTool: OrderTool
+  private readonly tableTool: TableTool
   private readonly orderOverlay = new OrderOverlay()
   private tool: Tool
-  private toolName: 'select' | 'order' = 'select'
+  private toolName: ToolKind = 'select'
   private orderDirty = true
   private baseEdges: EdgeSet = createEdgeSet()
   private effectiveEdges: EdgeSet = createEdgeSet()
@@ -102,6 +107,11 @@ export class Session {
       pick: (x, y) => this.worker.hitTest(x, y),
       requestDraw: () => this.engine.requestDraw(),
       hasEdge: (f, t) => hasEdge(this.effectiveEdges, f, t),
+    })
+    this.tableTool = new TableTool({
+      tableAt: (id) => this.tableAt(id),
+      pick: (x, y) => this.worker.hitTest(x, y),
+      requestDraw: () => this.engine.requestDraw(),
     })
     this.tool = this.selectTool
 
@@ -210,15 +220,51 @@ export class Session {
     return this.tool
   }
 
-  setTool(name: 'select' | 'order'): void {
+  setTool(name: ToolKind): void {
     this.toolName = name
-    this.tool = name === 'order' ? this.orderTool : this.selectTool
+    this.tool =
+      name === 'order' ? this.orderTool : name === 'table' ? this.tableTool : this.selectTool
     this.showOrder = name === 'order'
+    if (name === 'table') {
+      const sel = useStore.getState().selectedId
+      // Adopt whatever is already selected, so switching tools with a cell
+      // selected shows its mesh immediately instead of demanding a second click.
+      if (sel !== null) void this.tableTool.adopt(sel)
+    }
     this.engine.requestDraw()
   }
 
-  get currentTool(): 'select' | 'order' {
+  get currentTool(): ToolKind {
     return this.toolName
+  }
+
+  /**
+   * The table containing `nodeId`: either the node is a `Cell` (its parent is
+   * the table block) or it is the block itself. Tables are not a node type —
+   * they are a parent whose children are cells — so detection is a parent/child
+   * scan, not a flag lookup. O(document), but it runs on tool adoption (one
+   * click), never per frame; index children by parent id at ingest only if a
+   * profile shows FUNSD's 41k nodes making it matter.
+   */
+  tableAt(nodeId: number): TableSnapshot | null {
+    const i = indexOfId(this.nodes, nodeId)
+    if (i < 0) return null
+    const tableId = this.nodes.types[i] === NodeType.Cell ? this.nodes.parents[i] : nodeId
+    if (tableId < 0) return null
+
+    const cells: TableSnapshot['cells'] = []
+    for (let j = 0; j < this.nodes.count; j++) {
+      if (this.nodes.parents[j] !== tableId || this.nodes.types[j] !== NodeType.Cell) continue
+      const c = j * 4
+      cells.push({
+        id: this.nodes.ids[j],
+        x: this.nodes.coords[c],
+        y: this.nodes.coords[c + 1],
+        w: this.nodes.coords[c + 2],
+        h: this.nodes.coords[c + 3],
+      })
+    }
+    return cells.length === 0 ? null : { tableId, cells }
   }
 
   showOrder = false
@@ -363,6 +409,13 @@ export class Session {
         if (di >= 0) this.nodes.flags[di] |= FLAG_DIRTY
       }
       this.applyEdits(state.edits)
+      // Undo/redo rewrites cell geometry underneath the mesh; rebuild it from
+      // the render arrays so the drawn dividers cannot lie about the boxes.
+      // `adopt` only reads `this.nodes` and requests a draw, so it cannot loop
+      // back through the store.
+      if (this.toolName === 'table' && this.tableTool.tableId !== null) {
+        void this.tableTool.adopt(this.tableTool.tableId)
+      }
       this.orderDirty = true
       this.engine.requestDraw()
     })

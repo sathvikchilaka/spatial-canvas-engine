@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Session } from '@/app/session'
-import { indexOfId, type Rect } from '@/data/nodes'
+import { indexOfId, NodeType, type Rect } from '@/data/nodes'
 import { createSyntheticDocument } from '@/data/synthetic/source'
 import { serializeGeneratedPage } from '@/data/synthetic/serialize'
 import { commit, redo, resetHistory, undo, useStore } from '@/store/store'
@@ -391,6 +391,109 @@ describe('spatial index synchronisation', () => {
     } finally {
       vi.useRealTimers()
       clean()
+    }
+  })
+})
+
+describe('table detection', () => {
+  it('finds the cells of the table under a cell node, and nothing under a line', async () => {
+    vi.useFakeTimers()
+    try {
+      const s = new Session(canvas(), createSyntheticDocument(8, 1))
+      await s.ready
+      await s.connectStream()
+      for (let i = 0; i < 60 && !s.status.done; i++) await vi.advanceTimersByTimeAsync(50)
+
+      // The synthetic generator emits table cells as NodeType.Cell children of
+      // a Paragraph block; every even page carries a table with p=0.16.
+      let cellIndex = -1
+      for (let i = 0; i < s.nodes.count; i++) {
+        if (s.nodes.types[i] === NodeType.Cell) {
+          cellIndex = i
+          break
+        }
+      }
+      expect(cellIndex).toBeGreaterThanOrEqual(0)
+
+      const snap = s.tableAt(s.nodes.ids[cellIndex])
+      expect(snap).not.toBeNull()
+      expect(snap!.tableId).toBe(s.nodes.parents[cellIndex])
+      expect(snap!.cells.length).toBeGreaterThanOrEqual(12)
+      // Picking the table's parent node resolves to the same table.
+      expect(s.tableAt(snap!.tableId)!.tableId).toBe(snap!.tableId)
+
+      let lineIndex = -1
+      for (let i = 0; i < s.nodes.count; i++) {
+        if (s.nodes.types[i] === NodeType.Line) {
+          lineIndex = i
+          break
+        }
+      }
+      expect(lineIndex).toBeGreaterThanOrEqual(0)
+      expect(s.tableAt(s.nodes.ids[lineIndex])).toBeNull()
+
+      s.dispose()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('selecting the table tool does not throw on a document with no tables', async () => {
+    const s = new Session(canvas(), createSyntheticDocument(1, 1))
+    await s.ready
+    s.setTool('table')
+    expect(s.currentTool).toBe('table')
+    s.dispose()
+  })
+
+  /**
+   * The FUNSD case in miniature: adopting a node that is not part of any table
+   * must leave the tool with no mesh instead of throwing or drawing a lie.
+   */
+  it('adopts nothing when the selected node is not a table cell', async () => {
+    vi.useFakeTimers()
+    try {
+      const s = new Session(canvas(), createSyntheticDocument(8, 1))
+      await s.ready
+      await s.connectStream()
+      for (let i = 0; i < 60 && !s.status.done; i++) await vi.advanceTimersByTimeAsync(50)
+
+      let lineIndex = -1
+      for (let i = 0; i < s.nodes.count; i++) {
+        if (s.nodes.types[i] === NodeType.Line) {
+          lineIndex = i
+          break
+        }
+      }
+      expect(lineIndex).toBeGreaterThanOrEqual(0)
+      useStore.setState({ selectedId: s.nodes.ids[lineIndex] })
+      s.setTool('table')
+      await Promise.resolve()
+      expect(s.activeTool.name).toBe('table')
+      expect((s.activeTool as { mesh?: unknown }).mesh ?? null).toBeNull()
+
+      // A cell, by contrast, yields a mesh with at least one interior divider.
+      let cellIndex = -1
+      for (let i = 0; i < s.nodes.count; i++) {
+        if (s.nodes.types[i] === NodeType.Cell) {
+          cellIndex = i
+          break
+        }
+      }
+      expect(cellIndex).toBeGreaterThanOrEqual(0)
+      useStore.setState({ selectedId: s.nodes.ids[cellIndex] })
+      s.setTool('select')
+      s.setTool('table')
+      await Promise.resolve()
+      const mesh = (s.activeTool as { mesh?: { cols: number[]; rows: number[] } | null }).mesh
+      expect(mesh).not.toBeNull()
+      expect(mesh!.cols.length).toBeGreaterThanOrEqual(4)
+      expect(mesh!.rows.length).toBeGreaterThanOrEqual(5)
+
+      s.dispose()
+    } finally {
+      vi.useRealTimers()
+      useStore.setState({ selectedId: null })
     }
   })
 })

@@ -91,7 +91,23 @@ export function App() {
     }
     void build()
 
+    // V / O / T, as the toolbar's labels promise. Owned by the same effect as
+    // the session so the listener cannot outlive it.
+    const onToolKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return
+      const k = e.key.toLowerCase()
+      const next: ToolName | null =
+        k === "v" ? "select" : k === "o" ? "order" : k === "t" ? "table" : null
+      if (!next) return
+      setTool(next)
+      sessionRef.current?.setTool(next)
+    }
+    window.addEventListener("keydown", onToolKey)
+
     return () => {
+      window.removeEventListener("keydown", onToolKey)
       cancelled = true
       stopIngestProbe()
       offFrame?.()

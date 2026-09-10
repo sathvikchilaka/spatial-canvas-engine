@@ -149,7 +149,12 @@ export function attachInput(
   }
 
   const onUp = (e: PointerEvent) => {
-    const wasPinching = pinch !== null
+    // >=2 active pointers, not "pinch is non-null", is the source of truth:
+    // a pinch's baseline is only seeded on the first `pointermove` that
+    // follows the second `pointerdown`, so a two-finger tap that lifts
+    // before any move fires would otherwise look indistinguishable from a
+    // single-pointer gesture and lose the pan handoff below.
+    const wasPinching = active.size >= 2
     active.delete(e.pointerId)
 
     if (pointerId === e.pointerId && canvas.hasPointerCapture(e.pointerId)) {

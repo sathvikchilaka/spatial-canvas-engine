@@ -114,6 +114,25 @@ describe('attachInput pointer bookkeeping', () => {
     dispose()
   })
 
+  it('hands off to a pan when one finger lifts before any pinch move fires (finding 1, no-move path)', () => {
+    const canvas = makeCanvas()
+    const engine = makeEngine()
+    const dispose = attachInput(engine, canvas, () => null)
+
+    down(canvas, 1, 0, 50)
+    down(canvas, 2, 200, 50)
+    // No pointermove in between: a quick two-finger tap, or an overshoot,
+    // lifts one finger before the pinch baseline is ever seeded.
+    up(canvas, 1, 0, 50)
+
+    const before = engine.viewport
+    move(canvas, 2, 220, 50)
+    expect(engine.viewport.tx).not.toBe(before.tx)
+    expect(engine.viewport.scale).toBe(before.scale)
+
+    dispose()
+  })
+
   it('reseeds the baseline when the pinched pair changes identity (finding 2)', () => {
     const canvas = makeCanvas()
     const engine = makeEngine()

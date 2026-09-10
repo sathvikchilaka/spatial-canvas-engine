@@ -1,0 +1,9 @@
+node_modules
+dist
+dataset
+.git
+.github
+playwright-report
+test-results
+docs/perf/*.json
+*.log

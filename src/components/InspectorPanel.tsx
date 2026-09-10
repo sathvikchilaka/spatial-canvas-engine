@@ -2,10 +2,10 @@ import { useMemo } from "react"
 
 import type { NodeArrays, Rect } from "@/data/nodes"
 import { cn } from "@/lib/utils"
-import { useStore } from "@/store/store"
+import { setUiState, useStore } from "@/store/store"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { RowMeta } from "./TreeView"
-import { subtreeOf, toJson, toMarkdown } from "./inspectorModel"
+import { flattenInspectorTree, subtreeOf, type InspectorNode, type InspectorRow } from "./inspectorModel"
 
 type Props = {
   nodes: NodeArrays | null
@@ -20,6 +20,11 @@ type Props = {
  * JSON and Markdown views of the selected node's subtree. Subscribes to
  * `selectedId` and `edits` only — the stream writes to the typed arrays, not to
  * React, so this never re-renders during ingest.
+ *
+ * Rendered as per-node rows (not a flat `<pre>` string) so the panel can
+ * highlight-sync with the canvas/tree bi-directionally: clicking any node's
+ * row here selects it via `setUiState`, and the row matching `selectedId` is
+ * highlighted, mirroring `TreeView.tsx`'s row pattern.
  */
 export function InspectorPanel({ nodes, version, meta, rectOf, onFocus }: Props) {
   const selectedId = useStore((s) => s.selectedId)
@@ -33,8 +38,7 @@ export function InspectorPanel({ nodes, version, meta, rectOf, onFocus }: Props)
     [nodes, selectedId, meta, rectOf, edits, version],
   )
 
-  const json = useMemo(() => (tree ? toJson(tree) : ""), [tree])
-  const markdown = useMemo(() => (tree ? toMarkdown(tree) : ""), [tree])
+  const rows = useMemo(() => (tree ? flattenInspectorTree(tree) : []), [tree])
 
   if (!tree) {
     return (
@@ -68,18 +72,18 @@ export function InspectorPanel({ nodes, version, meta, rectOf, onFocus }: Props)
       </div>
 
       <TabsContent value="json" className="min-h-0 flex-1 overflow-auto p-0">
-        <Pane text={json} />
+        <RowPane rows={rows} selectedId={selectedId} variant="json" onFocus={onFocus} />
       </TabsContent>
       <TabsContent value="markdown" className="min-h-0 flex-1 overflow-auto p-0">
-        <Pane text={markdown} />
+        <RowPane rows={rows} selectedId={selectedId} variant="markdown" onFocus={onFocus} />
       </TabsContent>
       <TabsContent value="split" className="min-h-0 flex-1 overflow-hidden p-0">
         <div className="grid h-full grid-cols-1 divide-y divide-border md:grid-cols-2 md:divide-x md:divide-y-0">
           <div className="min-h-0 overflow-auto">
-            <Pane text={json} />
+            <RowPane rows={rows} selectedId={selectedId} variant="json" onFocus={onFocus} />
           </div>
           <div className="min-h-0 overflow-auto">
-            <Pane text={markdown} />
+            <RowPane rows={rows} selectedId={selectedId} variant="markdown" onFocus={onFocus} />
           </div>
         </div>
       </TabsContent>
@@ -87,15 +91,66 @@ export function InspectorPanel({ nodes, version, meta, rectOf, onFocus }: Props)
   )
 }
 
-function Pane({ text, className }: { text: string; className?: string }) {
+const r2 = (v: number) => Math.round(v * 100) / 100
+
+/** One row's text for the JSON-flavored rendering — compact, still valid-looking JSON per node. */
+function jsonLine(n: InspectorNode): string {
+  const rect = `{ "x": ${r2(n.rect.x)}, "y": ${r2(n.rect.y)}, "w": ${r2(n.rect.w)}, "h": ${r2(n.rect.h)} }`
+  return `{ "id": ${n.id}, "type": "${n.type}", "label": "${n.label}", "text": ${JSON.stringify(n.text)}, "rect": ${rect}, "modified": ${n.modified} }`
+}
+
+/** One row's text for the Markdown-flavored rendering — heading for branches, list item for leaves. */
+function markdownLine(n: InspectorNode, depth: number): string {
+  if (n.children.length === 0) return `- ${n.text || `#${n.id}`}${n.modified ? " *(edited)*" : ""}`
+  const head = "#".repeat(Math.min(6, depth + 2))
+  const name = n.label === "none" || n.label === "word" ? `#${n.id}` : n.label
+  return `${head} ${name}${n.modified ? " *(edited)*" : ""}`
+}
+
+/**
+ * Renders one flattened subtree as clickable, individually-addressable rows.
+ * Clicking a row selects that node via the store's `setUiState` (never raw
+ * `useStore.setState`, which would wipe undo history) and recenters the
+ * canvas on it — the same bi-directional contract `TreeView.tsx` rows have.
+ */
+function RowPane({
+  rows,
+  selectedId,
+  variant,
+  onFocus,
+}: {
+  rows: InspectorRow[]
+  selectedId: number | null
+  variant: "json" | "markdown"
+  onFocus(id: number): void
+}) {
   return (
-    <pre
-      className={cn(
-        "whitespace-pre-wrap break-words px-3 py-2 font-mono text-[11px] leading-relaxed text-muted-foreground",
-        className,
-      )}
-    >
-      {text}
-    </pre>
+    <div className="py-1 font-mono text-[11px] leading-relaxed">
+      {rows.map(({ node, depth }) => (
+        <div
+          key={node.id}
+          role="button"
+          tabIndex={0}
+          onClick={() => {
+            setUiState({ selectedId: node.id })
+            onFocus(node.id)
+          }}
+          onKeyDown={(e) => {
+            if (e.key !== "Enter" && e.key !== " ") return
+            e.preventDefault()
+            setUiState({ selectedId: node.id })
+            onFocus(node.id)
+          }}
+          style={{ paddingLeft: 12 + depth * 12 }}
+          className={cn(
+            "cursor-pointer whitespace-pre-wrap break-words py-0.5 pr-3 text-muted-foreground transition-colors",
+            "hover:bg-accent hover:text-accent-foreground",
+            node.id === selectedId && "bg-accent text-accent-foreground",
+          )}
+        >
+          {variant === "json" ? jsonLine(node) : markdownLine(node, depth)}
+        </div>
+      ))}
+    </div>
   )
 }

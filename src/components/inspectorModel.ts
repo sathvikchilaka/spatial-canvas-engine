@@ -72,6 +72,22 @@ export function subtreeOf(
   return build(rootId)
 }
 
+export type InspectorRow = {
+  node: InspectorNode
+  depth: number
+}
+
+/**
+ * Depth-first flattening of a subtree, for row-based rendering (each node
+ * becomes one clickable row instead of a flat JSON/Markdown string) — mirrors
+ * `buildTreeRows` in `TreeView.tsx` but over an already-materialized subtree.
+ */
+export function flattenInspectorTree(node: InspectorNode, depth = 0): InspectorRow[] {
+  const rows: InspectorRow[] = [{ node, depth }]
+  for (const child of node.children) rows.push(...flattenInspectorTree(child, depth + 1))
+  return rows
+}
+
 const r2 = (v: number) => Math.round(v * 100) / 100
 
 /** Pretty JSON with coordinates rounded — `104.00000762939453` is Float32 noise, not data. */

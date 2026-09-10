@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createNodeArrays, pushNode, NodeType } from '@/data/nodes'
 import { SemanticLabel } from '@/worker/protocol'
-import { subtreeOf, toJson, toMarkdown } from '@/components/inspectorModel'
+import { flattenInspectorTree, subtreeOf, toJson, toMarkdown } from '@/components/inspectorModel'
 
 /** One question entity with two word children. */
 function form() {
@@ -50,6 +50,29 @@ describe('subtreeOf', () => {
   it('caps the subtree so a huge parent cannot lock the panel', () => {
     const t = subtreeOf(form(), 1, meta, rectOf, () => false, 2)!
     expect(t.children).toHaveLength(1)
+  })
+})
+
+describe('flattenInspectorTree', () => {
+  it('depth-first flattens the subtree with depth per row', () => {
+    const t = subtreeOf(form(), 1, meta, rectOf, () => false)!
+    const rows = flattenInspectorTree(t)
+    expect(rows.map((r) => [r.node.id, r.depth])).toEqual([
+      [1, 0],
+      [2, 1],
+      [3, 1],
+    ])
+  })
+
+  it('roots depth at the given offset', () => {
+    const t = subtreeOf(form(), 1, meta, rectOf, () => false)!
+    const rows = flattenInspectorTree(t, 2)
+    expect(rows.map((r) => r.depth)).toEqual([2, 3, 3])
+  })
+
+  it('flattens a leaf to a single row', () => {
+    const t = subtreeOf(form(), 2, meta, rectOf, () => false)!
+    expect(flattenInspectorTree(t)).toEqual([{ node: t, depth: 0 }])
   })
 })
 

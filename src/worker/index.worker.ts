@@ -56,6 +56,17 @@ function ingest(page: SerializedPage, edges: number[] = []) {
 }
 
 /**
+ * Parse one page's annotation JSON and publish the result. Shared by
+ * `ingestUrl` (worker fetches the asset) and `ingestJson` (a live SSE event
+ * pushed the body inline) so there is exactly one parser call site.
+ */
+function ingestForm(pageIndex: number, text: string, offsetX: number, offsetY: number) {
+  const form = JSON.parse(text) as FunsdForm
+  const { nodes: parsed, edges } = parseFunsdPage(form, pageIndex, offsetX, offsetY)
+  ingest({ pageIndex, nodes: parsed }, edges)
+}
+
+/**
  * The whole point of the worker: annotation files are fetched, parsed and
  * indexed here. The main thread only ever sees transferable typed arrays.
  * An unknown/malformed URL or a failed fetch throws — the caller replies
@@ -74,9 +85,8 @@ async function ingestUrl(pageIndex: number, url: string, offsetX: number, offset
   }
   const res = await fetch(url)
   if (!res.ok) throw new Error(`funsd fetch failed: ${res.status}`)
-  const form = (await res.json()) as FunsdForm
-  const { nodes: parsed, edges } = parseFunsdPage(form, pageIndex, offsetX, offsetY)
-  ingest({ pageIndex, nodes: parsed }, edges)
+  const text = await res.text()
+  ingestForm(pageIndex, text, offsetX, offsetY)
 }
 
 /** Topmost hit: smallest area wins, ties broken by later reading order. */
@@ -123,6 +133,17 @@ self.onmessage = (e: MessageEvent<Req>) => {
           reply({ id: UNSOLICITED, kind: 'error', message: (err as Error).message }),
         )
         break
+      case 'ingestJson': {
+        try {
+          ingestForm(msg.pageIndex, msg.json, msg.offsetX, msg.offsetY)
+          reply({ id: msg.id, kind: 'ok' })
+        } catch (err) {
+          // A single malformed event must not kill the worker — the other 198
+          // pages are still coming.
+          reply({ id: msg.id, kind: 'error', message: String((err as Error).message ?? err) })
+        }
+        break
+      }
       case 'hitTest':
         reply({ id: msg.id, kind: 'hit', nodeId: hitTest(msg.x, msg.y) })
         break

@@ -124,3 +124,39 @@ describe('WorkerClient.ingestUrl', () => {
     client.dispose()
   })
 })
+
+describe('WorkerClient.ingestJson', () => {
+  it('sends the raw JSON string to the worker, unparsed', async () => {
+    const postMessage = vi.fn()
+    const worker = { postMessage, terminate: vi.fn() } as unknown as Worker
+    const client = new WorkerClient(worker)
+
+    const json = '{"form":[]}'
+    const pending = client.ingestJson(7, json, 100, 200)
+    const sent = postMessage.mock.calls.at(-1)![0] as { id: number; kind: string; pageIndex: number; json: string; offsetX: number; offsetY: number }
+
+    expect(sent.kind).toBe('ingestJson')
+    expect(sent.pageIndex).toBe(7)
+    // A string, not an object: parsing on this thread is the thing we avoid.
+    expect(sent.json).toBe(json)
+    expect(sent.offsetX).toBe(100)
+    expect(sent.offsetY).toBe(200)
+
+    worker.onmessage?.({ data: { id: sent.id, kind: 'ok' } } as MessageEvent)
+    await expect(pending).resolves.toBeUndefined()
+    client.dispose()
+  })
+
+  it('rejects when the worker reports a parse error', async () => {
+    const postMessage = vi.fn()
+    const worker = { postMessage, terminate: vi.fn() } as unknown as Worker
+    const client = new WorkerClient(worker)
+
+    const pending = client.ingestJson(7, '{bad', 0, 0)
+    const sent = postMessage.mock.calls.at(-1)![0] as { id: number }
+
+    worker.onmessage?.({ data: { id: sent.id, kind: 'error', message: 'bad json' } } as MessageEvent)
+    await expect(pending).rejects.toThrow('bad json')
+    client.dispose()
+  })
+})

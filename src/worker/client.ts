@@ -77,6 +77,15 @@ export class WorkerClient {
     } satisfies Req)
   }
 
+  /**
+   * Hands the worker a raw payload string. The caller must NOT parse it first —
+   * `JSON.parse` of a page body on the main thread is precisely the long task
+   * this architecture exists to avoid.
+   */
+  ingestJson(pageIndex: number, json: string, offsetX: number, offsetY: number): Promise<void> {
+    return this.request({ kind: 'ingestJson', pageIndex, json, offsetX, offsetY }) as Promise<void>
+  }
+
   onPageIngested(cb: (p: PageIngested) => void): () => void {
     this.pageSubs.add(cb)
     return () => this.pageSubs.delete(cb)

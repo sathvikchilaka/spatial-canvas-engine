@@ -37,6 +37,7 @@ export type Req = { id: number } & (
   | { kind: 'init'; bounds: Rect }
   | { kind: 'ingestPage'; page: SerializedPage }
   | { kind: 'ingestUrl'; pageIndex: number; url: string; offsetX: number; offsetY: number }
+  | { kind: 'ingestJson'; pageIndex: number; json: string; offsetX: number; offsetY: number }
   | { kind: 'hitTest'; x: number; y: number }
   | { kind: 'queryRect'; x: number; y: number; w: number; h: number }
   | { kind: 'updateNode'; nodeId: number; old: Rect; next: Rect }

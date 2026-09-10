@@ -133,6 +133,32 @@ describe('attachInput pointer bookkeeping', () => {
     dispose()
   })
 
+  it('terminates the active tool gesture when a second finger starts a pinch', () => {
+    const canvas = makeCanvas()
+    const engine = makeEngine()
+    const calls: string[] = []
+    // A tool that claims the gesture, the way SelectTool does when a resize
+    // handle is pressed (it enters `phase='dragging'` and opens a coalesce).
+    const tool = {
+      onDown: () => (calls.push('down'), true),
+      onMove: () => void calls.push('move'),
+      onUp: () => void calls.push('up'),
+    }
+    const dispose = attachInput(engine, canvas, () => tool)
+
+    down(canvas, 1, 100, 100) // tool claims this pointer
+    expect(calls).toEqual(['down'])
+    down(canvas, 2, 300, 100) // pinch begins — the tool gesture must end here
+    expect(calls.filter((c) => c === 'up')).toHaveLength(1)
+
+    // The later pointerup for the same finger must not fire the tool again,
+    // or `endCoalesce` would run twice against a tool already idle.
+    up(canvas, 1, 100, 100)
+    expect(calls.filter((c) => c === 'up')).toHaveLength(1)
+
+    dispose()
+  })
+
   it('reseeds the baseline when the pinched pair changes identity (finding 2)', () => {
     const canvas = makeCanvas()
     const engine = makeEngine()

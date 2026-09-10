@@ -92,6 +92,19 @@ export function attachInput(
       // pair swap mid-gesture goes through the same seeding path (finding 2)
       // instead of being duplicated here.
       panning = false
+      if (pointerId !== -1) {
+        // A single-pointer *tool* gesture is also superseded, and unlike a pan
+        // it owns state that must be unwound: SelectTool sits in
+        // `phase='dragging'` with an open `beginCoalesce`, and the later
+        // `pointerup` takes the pinch branch and never reaches the tool. Ending
+        // the gesture here runs `endCoalesce` and returns the tool to idle — the
+        // drag is frozen from the first pinch move anyway, so there is nothing
+        // left to drive. `Tool` has no cancel path; `onUp` is the terminator,
+        // and it commits from the tool's own draft, not from this event.
+        getTool()?.onUp?.(toWorld(e))
+        if (canvas.hasPointerCapture(pointerId)) canvas.releasePointerCapture(pointerId)
+        pointerId = -1
+      }
       return
     }
     const p = toWorld(e)
@@ -178,7 +191,8 @@ export function attachInput(
           panning = false
         }
       }
-      // A lifted pinch finger never drove the active tool; nothing else to do.
+      // Any tool gesture was already terminated in `onDown` when the pinch
+      // began, so there is nothing to hand the tool here.
       return
     }
 

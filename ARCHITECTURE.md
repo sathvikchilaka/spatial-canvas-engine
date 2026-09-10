@@ -182,19 +182,30 @@ Occupancy gaps alone are not enough, because the tool's own output has none: `ce
 table, so committed cells share exact edges and every extent would fuse into a single band —
 which is precisely how the mesh used to collapse to 1x1 after the first gesture. `bandsOf`
 therefore also splits an interval at its interior **shared edges**, a coordinate that is one
-extent's `hi` and another's `lo` *exactly*. Exactness is what keeps this structural: two cells
-tiled from the same divider line carry byte-identical edges, whereas merely nearby extraction
-edges differ and stay in one band. `MIN_BAND = 8` is unrelated to the whole derivation; it is
-purely the clamp on how far a divider drag may shrink a band.
+extent's `hi` and another's `lo` *within `edgeUlp`* — not exact equality. Two cells tiled from the
+same divider line are **not** guaranteed byte-identical at that edge: the store, `nodes.coords`,
+is a `Float32Array` holding `x`/`w`, not the two edges themselves, so `Session.tableAt` hands
+`buildMesh` a right edge computed as `fl32(x0) + fl32(x1 - x0)` while the neighbouring cell's left
+edge is read directly as `fl32(x1)` — two different float64 sums of float32 inputs that round-trip
+the same divider line but can land several float32 ULPs apart (measured: ~75% of realistic
+fractional drags land on a table this shape). `edgeUlp` scales with the coordinate's own magnitude
+(float32 precision is relative, not absolute), which keeps the test structural rather than a
+generic misalignment threshold: it is ~1e4x smaller than `MIN_BAND`, so it recognises two
+computations of the *same* line without ever fusing two dividers a human genuinely dragged close
+together. `MIN_BAND = 8` remains unrelated to the whole derivation; it is purely the clamp on how
+far a divider drag may shrink a band.
 
 `cellRect` re-derives every cell's rect from the current lines on every read, which is what makes
 post-edit bbox recalculation a one-liner with no second bookkeeping copy. On the session side, the
 mesh is rebuilt from the render arrays after any store change that moved geometry — a commit, an
 undo, a redo — and because `tableAt` skips `FLAG_HIDDEN` cells, that rebuild never sees a
 merged-away or undone cell. The rebuild is *not* a repair mechanism, though: it is only safe
-because band derivation is a fixed point over `cellRect`'s own gapless output (pinned by tests in
+because band derivation is a fixed point over what the session actually stores — `cellRect`'s
+gapless output, round-tripped through the `Float32Array` `nodes.coords` the way `Session.tableAt`
+reads it, not `cellRect`'s float64 output taken at face value (pinned by tests in
 `tests/tools/tableMesh.test.ts` that feed a mesh's rects straight back into `buildMesh`, and by
-two-consecutive-gesture tests in `tests/tools/tableTool.test.ts`). The rebuild is also skipped
+float32-backed two-consecutive-gesture tests in `tests/tools/tableTool.test.ts`, including one that
+drags to a fractional coordinate and round-trips it through float32). The rebuild is also skipped
 while a gesture is live: hover and selection writes leave `state.edits` identical, and
 `TableTool.adopt` refuses outright while it is `capturing`, so an in-progress divider drag is
 never replaced by a freshly derived mesh. The diff baseline is written before each `commit()` for

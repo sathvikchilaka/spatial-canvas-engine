@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Session } from '@/app/session'
+import type { Rect } from '@/data/nodes'
 import { createSyntheticDocument } from '@/data/synthetic/source'
 import { serializeGeneratedPage } from '@/data/synthetic/serialize'
 import { commit, redo, resetHistory, undo, useStore } from '@/store/store'
@@ -67,6 +68,8 @@ if (typeof globalThis.Worker === 'undefined') {
   // same typed-array reply from `serializeGeneratedPage` — so a drained
   // stream really grows `session.nodes`, not just `pagesReceived`.
   class FakeWorker {
+    /** Every updateNode the session sent, in order — asserted by the sync tests. */
+    static updates: { nodeId: number; old: Rect; next: Rect }[] = []
     onmessage: ((e: MessageEvent) => void) | null = null
     onerror: ((e: unknown) => void) | null = null
     postMessage(msg: {
@@ -76,7 +79,15 @@ if (typeof globalThis.Worker === 'undefined') {
       url?: string
       offsetX?: number
       offsetY?: number
+      nodeId?: number
+      old?: Rect
+      next?: Rect
     }) {
+      if (msg.kind === 'updateNode') {
+        FakeWorker.updates.push({ nodeId: msg.nodeId!, old: msg.old!, next: msg.next! })
+        queueMicrotask(() => this.onmessage?.({ data: { id: msg.id, kind: 'ok' } } as MessageEvent))
+        return
+      }
       if (msg.kind === 'init') {
         queueMicrotask(() => this.onmessage?.({ data: { id: msg.id, kind: 'ready' } } as MessageEvent))
         return

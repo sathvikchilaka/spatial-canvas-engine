@@ -216,3 +216,67 @@ export function cellRect(mesh: Mesh, cell: MeshCell): Rect {
   const y1 = mesh.rows[Math.min(mesh.rows.length - 1, cell.row + cell.rowSpan)]
   return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }
 }
+
+/**
+ * Moves one divider, clamped so no band collapses below `MIN_BAND`. Returns a
+ * new `Mesh`; the caller re-derives cell rects with `cellRect` and commits
+ * exactly the ones that changed.
+ */
+export function moveDivider(
+  mesh: Mesh,
+  axis: "row" | "col",
+  index: number,
+  toWorld: number
+): Mesh {
+  const lines = axis === "row" ? mesh.rows : mesh.cols
+  if (index < 0 || index >= lines.length) return mesh
+
+  const lo = index > 0 ? lines[index - 1] + MIN_BAND : -Infinity
+  const hi = index < lines.length - 1 ? lines[index + 1] - MIN_BAND : Infinity
+  const next = [...lines]
+  next[index] = Math.min(hi, Math.max(lo, toWorld))
+
+  const rows = axis === "row" ? next : mesh.rows
+  const cols = axis === "col" ? next : mesh.cols
+  return {
+    rows,
+    cols,
+    bounds: {
+      x: cols[0],
+      y: rows[0],
+      w: cols[cols.length - 1] - cols[0],
+      h: rows[rows.length - 1] - rows[0],
+    },
+    cells: mesh.cells.map((c) => ({ ...c })),
+  }
+}
+
+/**
+ * Which divider a world point lands on. `slopWorld` is the caller's screen slop
+ * divided by scale, so the grab target is constant in screen pixels at any zoom.
+ * Column lines win a corner tie — vertical dividers are the ones a reviewer
+ * reaches for most in a form table.
+ */
+export function hitDivider(
+  mesh: Mesh,
+  wx: number,
+  wy: number,
+  slopWorld: number
+): { axis: "row" | "col"; index: number } | null {
+  const b = mesh.bounds
+  const insideY = wy >= b.y - slopWorld && wy <= b.y + b.h + slopWorld
+  const insideX = wx >= b.x - slopWorld && wx <= b.x + b.w + slopWorld
+  if (insideY) {
+    for (let i = 0; i < mesh.cols.length; i++) {
+      if (Math.abs(wx - mesh.cols[i]) <= slopWorld)
+        return { axis: "col", index: i }
+    }
+  }
+  if (insideX) {
+    for (let i = 0; i < mesh.rows.length; i++) {
+      if (Math.abs(wy - mesh.rows[i]) <= slopWorld)
+        return { axis: "row", index: i }
+    }
+  }
+  return null
+}

@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest"
 import {
   buildMesh,
   cellRect,
+  hitDivider,
+  moveDivider,
   MIN_BAND,
   type CellInput,
   type Mesh,
@@ -291,5 +293,79 @@ describe("cellRect", () => {
       w: 0,
       h: 0,
     })
+  })
+})
+
+describe("moveDivider", () => {
+  it("moves an interior line and recalculates both neighbouring cells", () => {
+    const m0 = buildMesh(insetGrid())
+    const m1 = moveDivider(m0, "col", 1, 170)
+    expectMonotonic(m1)
+    expect(m1.cols).toEqual([106, 170, 194])
+    expect(cellRect(m1, m1.cells[0])).toEqual({ x: 106, y: 206, w: 64, h: 14 })
+    expect(cellRect(m1, m1.cells[1])).toEqual({ x: 170, y: 206, w: 24, h: 14 })
+  })
+
+  it("does not mutate the input mesh", () => {
+    const m0 = buildMesh(insetGrid())
+    moveDivider(m0, "col", 1, 170)
+    expect(m0.cols[1]).toBe(150)
+  })
+
+  it("clamps against the previous neighbour", () => {
+    const m0 = buildMesh(insetGrid())
+    const m1 = moveDivider(m0, "col", 1, 0)
+    expectMonotonic(m1)
+    expect(m1.cols[1]).toBe(106 + MIN_BAND)
+  })
+
+  it("clamps against the next neighbour", () => {
+    const m0 = buildMesh(insetGrid())
+    const m1 = moveDivider(m0, "col", 1, 9999)
+    expectMonotonic(m1)
+    expect(m1.cols[1]).toBe(194 - MIN_BAND)
+  })
+
+  it("lets an outer line grow the table", () => {
+    const m0 = buildMesh(insetGrid())
+    const m1 = moveDivider(m0, "row", 3, 300)
+    expectMonotonic(m1)
+    expect(m1.rows[3]).toBe(300)
+    expect(m1.bounds.h).toBe(94)
+  })
+
+  it("clamps an outer line against its only neighbour", () => {
+    const m0 = buildMesh(insetGrid())
+    const m1 = moveDivider(m0, "row", 0, 9999)
+    expectMonotonic(m1)
+    expect(m1.rows[0]).toBe(220 - MIN_BAND)
+  })
+
+  it("ignores an out-of-range index", () => {
+    const m0 = buildMesh(insetGrid())
+    expect(moveDivider(m0, "col", 99, 10)).toBe(m0)
+  })
+})
+
+describe("hitDivider", () => {
+  it("finds a line within screen-constant slop", () => {
+    const m = buildMesh(insetGrid())
+    expect(hitDivider(m, 151, 230, 4)).toEqual({ axis: "col", index: 1 })
+    expect(hitDivider(m, 130, 221, 4)).toEqual({ axis: "row", index: 1 })
+  })
+
+  it("misses outside the table bounds", () => {
+    const m = buildMesh(insetGrid())
+    expect(hitDivider(m, 150, 900, 4)).toBeNull()
+    expect(hitDivider(m, 900, 220, 4)).toBeNull()
+  })
+
+  it("returns null in open cell space", () => {
+    const m = buildMesh(insetGrid())
+    // Brief used wy=210, which is exactly 4px (the slop) from rows[0]=206 —
+    // a boundary hit, not a miss. Moved to 213 so the point is unambiguously
+    // >4px from every line (rows: 7/7/33/47, cols: 14/30/74), preserving the
+    // "open cell space" intent without relying on a <= tie.
+    expect(hitDivider(m, 120, 213, 4)).toBeNull()
   })
 })

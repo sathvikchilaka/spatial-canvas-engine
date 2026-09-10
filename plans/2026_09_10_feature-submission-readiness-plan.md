@@ -32,14 +32,14 @@
 - Produces: `pnpm test:e2e` runs Playwright against a `pnpm preview` server it starts itself. `pnpm test` stays Vitest-only, so CI and the unit loop are unaffected.
 - The spec asserts the graded user-visible behaviours end to end: the app boots, the Stress document toggle loads 10k+ boxes, a click selects in under 2ms-ish (asserted via the exposed `__pick()` harness rather than wall-clock flake), pan/zoom does not throw, and undo/redo round-trips an edit.
 
-- [ ] **Step 1: Install Playwright**
+- [x] **Step 1: Install Playwright**
 
 ```bash
 pnpm add -D @playwright/test
 pnpm exec playwright install chromium
 ```
 
-- [ ] **Step 2: Write the config**
+- [x] **Step 2: Write the config**
 
 ```ts
 // playwright.config.ts
@@ -74,7 +74,7 @@ export default defineConfig({
 })
 ```
 
-- [ ] **Step 3: Write the spec**
+- [x] **Step 3: Write the spec**
 
 ```ts
 // e2e/smoke.spec.ts
@@ -196,7 +196,7 @@ test.describe('spatial canvas engine', () => {
 })
 ```
 
-- [ ] **Step 4: Expose the two harness hooks the spec needs**
+- [x] **Step 4: Expose the two harness hooks the spec needs**
 
 The spec reads `window.__status()` and `window.__edits()`. `src/app/bench.ts` already installs `__bench`/`__pick`/`__ingest`; add the two read-only accessors next to them, behind the same gate:
 
@@ -209,7 +209,7 @@ The spec reads `window.__status()` and `window.__edits()`. `src/app/bench.ts` al
 
 If `session.status` does not currently include `nodeCount`, add it (`nodeCount: this.nodes.count`) — the status bar wants it anyway.
 
-- [ ] **Step 5: Scripts and ignores**
+- [x] **Step 5: Scripts and ignores**
 
 `package.json`:
 
@@ -225,12 +225,12 @@ playwright-report/
 test-results/
 ```
 
-- [ ] **Step 6: Run it**
+- [x] **Step 6: Run it**
 
 Run: `pnpm test:e2e`
 Expected: 5 passing. If the perf assertions flake on a loaded machine, loosen the *thresholds* with a comment recording the observed value — never delete the assertion.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add playwright.config.ts e2e package.json .gitignore src/app/bench.ts
@@ -248,7 +248,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 **Interfaces:** None. It is still the untouched `React + TypeScript + Vite + shadcn/ui` template — the first thing a reviewer opens.
 
-- [ ] **Step 1: Write it**
+- [x] **Step 1: Write it**
 
 ```markdown
 # Spatial Canvas Engine
@@ -353,7 +353,7 @@ redistributed here.
 
 Replace the demo-link placeholder in Task 5. Do not leave the HTML comment in the final commit of that task.
 
-- [ ] **Step 2: Check every command in it actually runs**
+- [x] **Step 2: Check every command in it actually runs**
 
 ```bash
 pnpm install && pnpm build && pnpm test && pnpm typecheck && pnpm lint
@@ -361,7 +361,7 @@ pnpm install && pnpm build && pnpm test && pnpm typecheck && pnpm lint
 
 Any command the README names that fails is a broken promise on the first page — fix the command or the README, not the reviewer's expectations.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add README.md
@@ -379,7 +379,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 **Interfaces:** `docker build -t spatial-canvas-engine . && docker run --rm -p 8080:80 spatial-canvas-engine` serves the production build on port 80. The app is a static SPA — no server-side rendering, no API — so nginx serving `dist/` is the whole runtime.
 
-- [ ] **Step 1: Write `.dockerignore`**
+- [x] **Step 1: Write `.dockerignore`**
 
 ```
 node_modules
@@ -395,7 +395,7 @@ docs/perf/*.json
 
 `dataset/` is excluded explicitly: it is the FUNSD corpus, non-commercial research use only, and must not end up baked into a distributable image. `public/funsd/` (the *prepared* assets) is **not** excluded, so an image built after `pnpm prepare:funsd` includes both documents and an image built without it still ships the synthetic one.
 
-- [ ] **Step 2: Write the Dockerfile**
+- [x] **Step 2: Write the Dockerfile**
 
 ```dockerfile
 # syntax=docker/dockerfile:1
@@ -422,7 +422,7 @@ EXPOSE 80
 HEALTHCHECK --interval=30s --timeout=3s CMD wget -qO- http://localhost/ >/dev/null || exit 1
 ```
 
-- [ ] **Step 3: Write `docker/nginx.conf`**
+- [x] **Step 3: Write `docker/nginx.conf`**
 
 ```nginx
 server {
@@ -456,7 +456,7 @@ server {
 
 There is no `/events` proxy: the SSE feed is a dev-server process (see `ARCHITECTURE.md` §2), so a container serves the replay transport. The status bar says `replay`, which is honest.
 
-- [ ] **Step 4: Build and run it**
+- [x] **Step 4: Build and run it**
 
 ```bash
 docker build -t spatial-canvas-engine .
@@ -465,7 +465,7 @@ docker run --rm -p 8080:80 spatial-canvas-engine
 
 Open `http://localhost:8080`, click **Stress**, confirm the document streams in and pan/zoom is smooth. Confirm the FUNSD entry degrades gracefully if `public/funsd` was absent at build time.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Dockerfile .dockerignore docker/nginx.conf

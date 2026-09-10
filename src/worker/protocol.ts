@@ -1,5 +1,21 @@
 import type { Rect } from '@/data/nodes'
 
+/**
+ * The extraction's semantic label, as a small integer so it can ride a
+ * `Uint8Array` across the seam. FUNSD's four classes plus `Word` for the
+ * child word boxes and `None` for documents that carry no labels at all
+ * (the synthetic stress corpus).
+ */
+export const SemanticLabel = {
+  None: 0,
+  Question: 1,
+  Answer: 2,
+  Header: 3,
+  Other: 4,
+  Word: 5,
+} as const
+export type SemanticLabel = (typeof SemanticLabel)[keyof typeof SemanticLabel]
+
 export type SerializedNode = {
   id: number
   page: number
@@ -10,6 +26,9 @@ export type SerializedNode = {
   type: number
   parent: number
   order: number
+  /** Extracted text, if the source has any. */
+  text?: string
+  label?: SemanticLabel
 }
 
 export type SerializedPage = { pageIndex: number; nodes: SerializedNode[] }
@@ -35,6 +54,15 @@ export type PageIngested = {
   parents: Int32Array
   order: Int32Array
   edges: Int32Array
+  /**
+   * Text parallel to `ids`, `''` where the source has none. Strings cannot be
+   * transferred, only structured-cloned — but one array of ≤536 short strings
+   * per page is negligible beside the six typed arrays, and cloning it here is
+   * what keeps `JSON.parse` off the main thread.
+   */
+  texts: string[]
+  /** `SemanticLabel` parallel to `ids`. */
+  labels: Uint8Array
 }
 
 export type Res = { id: number } & (

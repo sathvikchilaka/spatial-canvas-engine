@@ -132,6 +132,8 @@ if (typeof globalThis.Worker === 'undefined') {
             parents,
             order,
             edges: new Int32Array(0),
+            texts: nodes.map((n) => n.text ?? ''),
+            labels: Uint8Array.from(nodes.map((n) => n.label ?? 0)),
           } as PageIngested & { id: number }
           this.onmessage?.({ data: res } as MessageEvent)
         })

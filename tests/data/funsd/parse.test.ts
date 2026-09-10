@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { ID_STRIDE, parseFunsdPage, type FunsdForm } from '@/data/funsd/parse'
 import { NodeType } from '@/data/nodes'
+import { SemanticLabel } from '@/worker/protocol'
 import fixture from './fixture.json'
 
 const form = fixture as FunsdForm
@@ -59,5 +60,41 @@ describe('parseFunsdPage', () => {
   it('drops a link whose target does not exist', () => {
     const broken: FunsdForm = { form: [{ ...form.form[0], linking: [[0, 99]] }] }
     expect(parseFunsdPage(broken, 0, 0, 0).edges).toHaveLength(0)
+  })
+})
+
+describe('text and label passthrough', () => {
+  it("keeps each entity's text and maps its label", () => {
+    const parsed = parseFunsdPage(fixture as FunsdForm, 0, 0, 0)
+    const entity = parsed.nodes.find((n) => n.parent === -1)!
+    expect(entity.text).toBe(fixture.form[0].text)
+    expect(entity.label).toBe(SemanticLabel.Question)
+  })
+
+  it("keeps each word's own text and labels it Word", () => {
+    const parsed = parseFunsdPage(fixture as FunsdForm, 0, 0, 0)
+    const word = parsed.nodes.find((n) => n.parent !== -1)!
+    expect(word.text).toBe(fixture.form[0].words[0].text)
+    expect(word.label).toBe(SemanticLabel.Word)
+  })
+
+  it('tolerates an entity with no text field', () => {
+    const form = { form: [{ ...fixture.form[0], text: undefined, words: [] }] }
+    const parsed = parseFunsdPage(form as unknown as FunsdForm, 0, 0, 0)
+    expect(parsed.nodes[0].text).toBe('')
+  })
+
+  it('maps every FUNSD label to a SemanticLabel', () => {
+    const labels = ['question', 'answer', 'header', 'other'] as const
+    const got = labels.map((label) => {
+      const form = { form: [{ ...fixture.form[0], label, words: [] }] }
+      return parseFunsdPage(form as unknown as FunsdForm, 0, 0, 0).nodes[0].label
+    })
+    expect(got).toEqual([
+      SemanticLabel.Question,
+      SemanticLabel.Answer,
+      SemanticLabel.Header,
+      SemanticLabel.Other,
+    ])
   })
 })

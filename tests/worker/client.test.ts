@@ -93,10 +93,34 @@ describe('WorkerClient.ingestUrl', () => {
         id: UNSOLICITED, kind: 'pageIngested', pageIndex: 0,
         ids: new Uint32Array(0), coords: new Float32Array(0), types: new Uint8Array(0),
         parents: new Int32Array(0), order: new Int32Array(0), edges: Int32Array.of(1, 2),
+        texts: [], labels: new Uint8Array(0),
       },
     } as MessageEvent)
 
     expect(Array.from(seen[0])).toEqual([1, 2])
+    client.dispose()
+  })
+
+  it('forwards texts and labels to the ingest handler', async () => {
+    // Extend the existing fake reply with the two new fields and assert the
+    // handler receives them verbatim — the seam is the only place text can be
+    // silently dropped, and it already was once.
+    const worker = { postMessage: vi.fn(), terminate: vi.fn() } as unknown as Worker
+    const client = new WorkerClient(worker)
+    const received: string[][] = []
+    client.onPageIngested((p) => received.push([...p.texts]))
+
+    worker.onmessage?.({
+      data: {
+        id: UNSOLICITED, kind: 'pageIngested', pageIndex: 0,
+        ids: new Uint32Array(0), coords: new Float32Array(0), types: new Uint8Array(0),
+        parents: new Int32Array(0), order: new Int32Array(0), edges: new Int32Array(0),
+        texts: ['Name:', 'Name'], labels: Uint8Array.of(1, 5),
+      },
+    } as MessageEvent)
+
+    await Promise.resolve()
+    expect(received[0]).toEqual(['Name:', 'Name'])
     client.dispose()
   })
 })

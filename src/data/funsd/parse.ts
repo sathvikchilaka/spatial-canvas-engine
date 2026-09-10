@@ -1,5 +1,5 @@
 import { NodeType } from '@/data/nodes'
-import type { SerializedNode } from '@/worker/protocol'
+import { SemanticLabel, type SerializedNode } from '@/worker/protocol'
 
 export type FunsdWord = { box: [number, number, number, number]; text: string }
 export type FunsdEntity = {
@@ -23,6 +23,13 @@ const TYPE_OF_LABEL: Record<FunsdEntity['label'], NodeType> = {
   answer: NodeType.KeyValue,
   header: NodeType.Paragraph,
   other: NodeType.Paragraph,
+}
+
+const LABEL_OF: Record<FunsdEntity['label'], SemanticLabel> = {
+  question: SemanticLabel.Question,
+  answer: SemanticLabel.Answer,
+  header: SemanticLabel.Header,
+  other: SemanticLabel.Other,
 }
 
 export type ParsedPage = { nodes: SerializedNode[]; edges: number[] }
@@ -58,6 +65,8 @@ export function parseFunsdPage(
       type: TYPE_OF_LABEL[entity.label] ?? NodeType.Paragraph,
       parent: -1,
       order: order++,
+      text: entity.text ?? '',
+      label: LABEL_OF[entity.label] ?? SemanticLabel.Other,
     })
     for (const word of entity.words ?? []) {
       const [wx0, wy0, wx1, wy1] = word.box
@@ -71,6 +80,8 @@ export function parseFunsdPage(
         type: NodeType.Line,
         parent: entityId,
         order: order++,
+        text: word.text ?? '',
+        label: SemanticLabel.Word,
       })
     }
   }

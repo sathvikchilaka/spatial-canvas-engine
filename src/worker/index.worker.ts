@@ -3,7 +3,7 @@ import { createNodeArrays, pushNode, type NodeArrays, type NodeType, type Rect }
 import { parseFunsdPage, type FunsdForm } from '@/data/funsd/parse'
 import { serializeGeneratedPage } from '@/data/synthetic/serialize'
 import { QuadTree } from './quadtree'
-import { UNSOLICITED, type Req, type Res, type SerializedPage } from './protocol'
+import { SemanticLabel, UNSOLICITED, type Req, type Res, type SerializedPage } from './protocol'
 
 const SYNTHETIC = 'synthetic://page/'
 
@@ -39,12 +39,19 @@ function ingest(page: SerializedPage, edges: number[] = []) {
   const parents = nodes.parents.slice(start, nodes.count)
   const order = nodes.order.slice(start, nodes.count)
   const edgeArray = Int32Array.from(edges)
+  const texts = new Array<string>(page.nodes.length)
+  const labels = new Uint8Array(page.nodes.length)
+  for (let i = 0; i < page.nodes.length; i++) {
+    texts[i] = page.nodes[i].text ?? ''
+    labels[i] = page.nodes[i].label ?? SemanticLabel.None
+  }
   const res: Res = {
     id: UNSOLICITED, kind: 'pageIngested', pageIndex: page.pageIndex,
-    ids, coords, types, parents, order, edges: edgeArray,
+    ids, coords, types, parents, order, edges: edgeArray, texts, labels,
   }
   ;(self as unknown as Worker).postMessage(res, [
     ids.buffer, coords.buffer, types.buffer, parents.buffer, order.buffer, edgeArray.buffer,
+    labels.buffer,
   ] as Transferable[])
 }
 

@@ -37,7 +37,7 @@
   - `export function cellRect(mesh: Mesh, cell: MeshCell): Rect`
   - `export const MIN_BAND = 8`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 // tests/tools/tableMesh.test.ts
@@ -132,12 +132,12 @@ describe('cellRect', () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `pnpm test -- tests/tools/tableMesh.test.ts`
 Expected: FAIL — cannot resolve `@/tools/tableMesh`.
 
-- [ ] **Step 3: Implement `src/tools/tableMesh.ts`**
+- [x] **Step 3: Implement `src/tools/tableMesh.ts`**
 
 ```ts
 import type { Rect } from '@/data/nodes'
@@ -249,12 +249,12 @@ export function cellRect(mesh: Mesh, cell: MeshCell): Rect {
 }
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `pnpm test -- tests/tools/tableMesh.test.ts && pnpm typecheck`
 Expected: PASS (all 9 cases).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/tools/tableMesh.ts tests/tools/tableMesh.test.ts
@@ -277,7 +277,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
   - `export function moveDivider(mesh: Mesh, axis: 'row' | 'col', index: number, toWorld: number): Mesh` — returns a new `Mesh` (same `cells` array reference is not reused; copy it). Clamps to `[neighbourBefore + MIN_BAND, neighbourAfter - MIN_BAND]`. Moving an outer line (index 0 or last) is allowed and grows/shrinks the table, clamped against its single neighbour.
   - `export function hitDivider(mesh: Mesh, wx: number, wy: number, slopWorld: number): { axis: 'row' | 'col'; index: number } | null` — column lines take precedence on a corner tie.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/tools/tableMesh.test.ts`:
 
@@ -350,12 +350,12 @@ describe('hitDivider', () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `pnpm test -- tests/tools/tableMesh.test.ts`
 Expected: FAIL — `moveDivider` / `hitDivider` are not exported.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Append to `src/tools/tableMesh.ts`:
 
@@ -423,12 +423,12 @@ export function hitDivider(
 }
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `pnpm test -- tests/tools/tableMesh.test.ts && pnpm typecheck`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/tools/tableMesh.ts tests/tools/tableMesh.test.ts
@@ -453,7 +453,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
   - `export class TableTool implements Tool` with `readonly name = 'table'`, `get mesh(): Mesh | null`, `get tableId(): number | null`.
   - `export function meshEdits(mesh: Mesh, original: Map<number, Rect>): Map<number, Rect>` — the changed-cells diff the commit writes; exported so it can be tested without a pointer.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 // tests/tools/tableTool.test.ts
@@ -603,12 +603,12 @@ describe('TableTool', () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `pnpm test -- tests/tools/tableTool.test.ts`
 Expected: FAIL — cannot resolve `@/tools/tableTool`.
 
-- [ ] **Step 3: Implement `src/tools/tableTool.ts`**
+- [x] **Step 3: Implement `src/tools/tableTool.ts`**
 
 ```ts
 import type { Rect } from '@/data/nodes'
@@ -795,7 +795,7 @@ export class TableTool implements Tool {
 
 Note the test's `drawHud` count of 6 `moveTo` calls: 3 column + 3 row lines for a 2×2 table, and the hover/active pass adds none because nothing is hovered.
 
-- [ ] **Step 4: Fix the `ephemeralRect` contract**
+- [x] **Step 4: Fix the `ephemeralRect` contract**
 
 `src/tools/adapter.ts` claims a gesture only when `tool.ephemeralRect !== null`, and `TableTool.ephemeralRect` is always `null` — so a divider drag would fall through to panning. Change `Tool` to declare intent explicitly. In `src/tools/types.ts`:
 
@@ -838,12 +838,12 @@ Add to `TableTool`:
 
 `SelectTool` and `OrderTool` need no change — their `ephemeralRect`/existing behaviour still drives `claimed`. (`OrderTool` relies on the pan fallback being suppressed only while linking; if link-dragging currently pans, add `get capturing() { return this.dragFrom !== null }` to `OrderTool` in the reading-order plan, not here.)
 
-- [ ] **Step 5: Run tests**
+- [x] **Step 5: Run tests**
 
 Run: `pnpm test && pnpm typecheck`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/tools/tableTool.ts src/tools/types.ts src/tools/adapter.ts tests/tools/tableTool.test.ts
@@ -869,7 +869,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
   - `Session.tableAt(nodeId: number): TableSnapshot | null` — public, so the session test can assert detection without a pointer.
   - `ToolName = 'select' | 'order' | 'table'` in `src/components/Toolbar.tsx`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/app/session.test.ts`:
 
@@ -928,12 +928,12 @@ describe('table detection', () => {
 
 Add `NodeType` to the file's `@/data/nodes` import.
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `pnpm test -- tests/app/session.test.ts`
 Expected: FAIL — `s.tableAt is not a function`.
 
-- [ ] **Step 3: Implement in `src/app/session.ts`**
+- [x] **Step 3: Implement in `src/app/session.ts`**
 
 Add the import and field:
 
@@ -1024,7 +1024,7 @@ Also re-adopt after a commit so the mesh reflects undo/redo. In `subscribeSelect
 
 Guard against re-entrancy: `adopt` only reads `this.nodes` and calls `requestDraw`, so this cannot loop through the store.
 
-- [ ] **Step 4: Add the toolbar button**
+- [x] **Step 4: Add the toolbar button**
 
 `src/components/Toolbar.tsx`:
 
@@ -1042,7 +1042,7 @@ const TOOLS: Array<{ name: ToolName; label: string; Icon: typeof MousePointer2 }
 
 No change is needed in `src/App.tsx` — it imports `ToolName` from the toolbar and forwards it to `session.setTool`.
 
-- [ ] **Step 5: Add the keyboard shortcuts**
+- [x] **Step 5: Add the keyboard shortcuts**
 
 The labels promise V / O / T. In `src/App.tsx`, inside the existing `useEffect` that owns the session, register a window key handler and clean it up in the same teardown:
 
@@ -1068,14 +1068,14 @@ The labels promise V / O / T. In `src/App.tsx`, inside the existing `useEffect` 
 
 and in the cleanup: `window.removeEventListener("keydown", onToolKey)`.
 
-- [ ] **Step 6: Run tests and drive it by hand**
+- [x] **Step 6: Run tests and drive it by hand**
 
 Run: `pnpm test && pnpm typecheck && pnpm lint`
 Expected: PASS.
 
 Run: `pnpm dev`, pick the **Stress · 100pp · 10k boxes** document, wait for `stream complete`, zoom to ~150% on a page with a table (orange `cell` boxes), press `T`, click a cell. The mesh appears; drag a vertical divider — the adjoining cells resize live, `Cmd+Z` restores them in one step, and the status bar's fps/ms-draw numbers do not move.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/app/session.ts src/components/Toolbar.tsx src/App.tsx tests/app/session.test.ts
@@ -1105,7 +1105,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
   - `Session` gains `private materializeStructural(edits: Record<number, Edit>): void`, plus `private readonly created = new Set<number>()` and `private readonly hidden = new Set<number>()`.
   - `Session.allocId(): number` — ids from a high, monotonically increasing base so a created cell can never collide with a streamed id (`ID_STRIDE` gives streamed ids `page * 1000 + n`, so `1_000_000_000 + counter` is unreachable).
 
-- [ ] **Step 1: Write the failing mesh tests**
+- [x] **Step 1: Write the failing mesh tests**
 
 Append to `tests/tools/tableMesh.test.ts`:
 
@@ -1182,12 +1182,12 @@ describe('mergeCells', () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `pnpm test -- tests/tools/tableMesh.test.ts`
 Expected: FAIL — `splitCell` / `mergeCells` are not exported.
 
-- [ ] **Step 3: Implement the mesh operations**
+- [x] **Step 3: Implement the mesh operations**
 
 Append to `src/tools/tableMesh.ts`:
 
@@ -1294,12 +1294,12 @@ export function mergeCells(mesh: Mesh, aId: number, bId: number): Mesh {
 }
 ```
 
-- [ ] **Step 4: Run the mesh tests**
+- [x] **Step 4: Run the mesh tests**
 
 Run: `pnpm test -- tests/tools/tableMesh.test.ts`
 Expected: PASS.
 
-- [ ] **Step 5: Extend the store and worker protocol**
+- [x] **Step 5: Extend the store and worker protocol**
 
 `src/store/store.ts`:
 
@@ -1363,7 +1363,7 @@ export type Edit = {
   }
 ```
 
-- [ ] **Step 6: Write the failing session test for structural edits**
+- [x] **Step 6: Write the failing session test for structural edits**
 
 Append to `tests/app/session.test.ts` (the `FakeWorker` from the correctness-fixes plan already replies `ok` to unknown kinds only if you added that branch; if not, add `insertNode`/`removeNode` to the same recorder):
 
@@ -1420,12 +1420,12 @@ describe('structural edits', () => {
 
 Add `FLAG_HIDDEN` and `indexOfId` to the file's `@/data/nodes` import.
 
-- [ ] **Step 7: Run to verify failure**
+- [x] **Step 7: Run to verify failure**
 
 Run: `pnpm test -- tests/app/session.test.ts`
 Expected: FAIL — `s.allocId is not a function`.
 
-- [ ] **Step 8: Implement structural materialization in `src/app/session.ts`**
+- [x] **Step 8: Implement structural materialization in `src/app/session.ts`**
 
 Add fields and the id allocator:
 
@@ -1566,7 +1566,7 @@ Clear both mirrors in `dispose()` alongside `this.overridden.clear()`:
 
 Add `FLAG_HIDDEN`, `pushNode` and `type Edit` to the imports (`Edit` from `@/store/store`).
 
-- [ ] **Step 9: Wire split/merge keys into `TableTool`**
+- [x] **Step 9: Wire split/merge keys into `TableTool`**
 
 Add to `src/tools/tableTool.ts`:
 
@@ -1664,16 +1664,16 @@ In `src/app/session.ts`, pass the two new deps to `new TableTool({...})`:
 
 `Tool.onKeyDown` is already routed via `toolHandlers().onKey` → `attachInput`'s window `keydown`, so no plumbing change is needed. Guard the App-level V/O/T handler from stealing `s`/`m`: it only matches v/o/t, so no change.
 
-- [ ] **Step 10: Run everything**
+- [x] **Step 10: Run everything**
 
 Run: `pnpm test && pnpm typecheck && pnpm lint`
 Expected: PASS.
 
-- [ ] **Step 11: Drive it by hand**
+- [x] **Step 11: Drive it by hand**
 
 Run: `pnpm dev`, synthetic document, press `T`, click a table cell, press `S` — the cell splits in two and no other cell moves. Click a neighbour, press `M` — the two merge. `Cmd+Z` three times returns to the original table. Click each affected cell afterwards and confirm selection lands on the box you clicked (proving the QuadTree followed).
 
-- [ ] **Step 12: Commit**
+- [x] **Step 12: Commit**
 
 ```bash
 git add src/tools/tableMesh.ts src/tools/tableTool.ts src/store/store.ts src/worker src/app/session.ts tests
@@ -1689,7 +1689,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 **Files:**
 - Modify: `ARCHITECTURE.md` (new §5b after the reading-order section, plus §8)
 
-- [ ] **Step 1: Add the section**
+- [x] **Step 1: Add the section**
 
 Insert after §5:
 
@@ -1730,7 +1730,7 @@ In §8, add:
   divider list, which the brief's "grid mesh" framing does not ask for.
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add ARCHITECTURE.md

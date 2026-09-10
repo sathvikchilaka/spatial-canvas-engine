@@ -23,6 +23,9 @@ export function createSyntheticDocument(pageCount: number, seed: number): Docume
       return canvas as PageBitmap
     },
     createStream() {
+      // No live transport: synthetic pages are generated inside the worker from
+      // a `synthetic://` URL, so there is nothing for a feed to push. The SSE
+      // endpoint serves FUNSD.
       return new MockStreamSource(pageCount, seed)
     },
   }

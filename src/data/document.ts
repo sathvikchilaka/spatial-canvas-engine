@@ -11,5 +11,9 @@ export interface DocumentSource {
   readonly pageCount: number
   geometry(): Promise<PageGeometry>
   raster(page: number): Promise<PageBitmap>
-  createStream(): StreamSource
+  /**
+   * The transport for this document. May be async because the live endpoint is
+   * probed before the replay is chosen.
+   */
+  createStream(): StreamSource | Promise<StreamSource>
 }

@@ -26,6 +26,7 @@ export function App() {
     shielded: 0,
     connected: false,
     done: false,
+    transport: "replay" as "sse" | "replay",
   })
   const [tool, setTool] = useState<ToolName>("select")
   const [docId, setDocId] = useState<DocumentId>("funsd")

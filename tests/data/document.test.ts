@@ -60,10 +60,16 @@ describe('synthetic document', () => {
 
 describe('funsd document', () => {
   beforeEach(() => {
-    vi.stubGlobal('fetch', vi.fn(async () => ({
-      ok: true,
-      json: async () => ({ pages: [{ id: 'a', w: 754, h: 1000 }, { id: 'b', w: 802, h: 1000 }] }),
-    })))
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: { method?: string }) => {
+      // The HEAD probe for the live SSE endpoint must miss so these tests
+      // exercise the replay fallback, not a phantom live source.
+      if (init?.method === 'HEAD') return { ok: false, status: 404, headers: { get: () => null } }
+      return {
+        ok: true,
+        headers: { get: () => null },
+        json: async () => ({ pages: [{ id: 'a', w: 754, h: 1000 }, { id: 'b', w: 802, h: 1000 }] }),
+      }
+    }))
   })
 
   afterEach(() => {
@@ -81,7 +87,7 @@ describe('funsd document', () => {
 
   it('streams annotation urls, not node payloads', async () => {
     const doc = await createFunsdDocument()
-    const stream = doc.createStream()
+    const stream = await doc.createStream()
     const urls: string[] = []
     stream.start((e) => { if (e.type === 'page') urls.push(e.url) })
     await vi.waitFor(() => expect(urls).toHaveLength(2), { timeout: 5000 })

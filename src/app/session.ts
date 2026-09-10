@@ -15,6 +15,7 @@ import { appendEdges, createEdgeSet, hasEdge, materialize, type EdgeSet } from '
 import type { Tool } from '@/tools/types'
 import { applyPageUpdate } from '@/store/merge'
 import type { StreamEvent, StreamSource } from '@/stream/source'
+import { SseStreamSource } from '@/stream/sseSource'
 import { WorkerClient } from '@/worker/client'
 import { SemanticLabel, type PageIngested } from '@/worker/protocol'
 import { labelFromName, labelName, TYPE_OF_LABEL } from '@/data/labels'
@@ -83,7 +84,7 @@ export class Session {
   private streamQueue: StreamEvent[] = []
   private drainTimer = 0
   /** Reported to the UI: pages seen, and edits the shield preserved. */
-  status = { pagesReceived: 0, shielded: 0, connected: false, done: false }
+  status = { pagesReceived: 0, shielded: 0, connected: false, done: false, transport: 'replay' as 'sse' | 'replay' }
   private onStatusChange: (() => void) | null = null
 
   constructor(canvas: HTMLCanvasElement, doc: DocumentSource) {
@@ -186,7 +187,10 @@ export class Session {
     // still pending. Without this guard the continuation installs a live source
     // on a corpse: its timers fire forever into a terminated worker.
     if (this.disposed) return
-    this.stream = this.doc.createStream()
+    const source = await Promise.resolve(this.doc.createStream())
+    if (this.disposed) return
+    this.stream = source
+    this.status.transport = source instanceof SseStreamSource ? 'sse' : 'replay'
     this.status.connected = true
     this.onStatusChange?.()
     this.stream.start((e) => {

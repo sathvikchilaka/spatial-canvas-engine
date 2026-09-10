@@ -1,7 +1,7 @@
 // tests/stream/source.test.ts
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { MockStreamSource } from '@/stream/mockSource'
-import { parseSseEnvelope } from '@/stream/sseSource'
+import { createStreamSource, parseSseEnvelope, SseStreamSource } from '@/stream/sseSource'
 
 describe('MockStreamSource', () => {
   it('emits every page exactly once, then done', async () => {
@@ -64,5 +64,55 @@ describe('parseSseEnvelope', () => {
 
   it('drops a page envelope with a non-string body', () => {
     expect(parseSseEnvelope(JSON.stringify({ t: 'p', i: 1, d: { form: [] } }))).toBeNull()
+  })
+})
+
+const fallback = () => new MockStreamSource(4, 1)
+
+function headStub(status: number, pageCount?: string) {
+  return vi.fn(async () => ({
+    ok: status >= 200 && status < 300,
+    status,
+    headers: { get: (k: string) => (k.toLowerCase() === 'x-page-count' ? (pageCount ?? null) : null) },
+  })) as unknown as typeof fetch
+}
+
+describe('createStreamSource', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('adopts SSE when the endpoint agrees on the page count', async () => {
+    vi.stubGlobal('fetch', headStub(200, '199'))
+    const s = await createStreamSource({ expectPages: 199, fallback })
+    expect(s).toBeInstanceOf(SseStreamSource)
+  })
+
+  it('adopts SSE when no page count is expected', async () => {
+    vi.stubGlobal('fetch', headStub(200))
+    expect(await createStreamSource({ fallback })).toBeInstanceOf(SseStreamSource)
+  })
+
+  it('falls back when the endpoint disagrees on the page count', async () => {
+    // A 100-page feed into a 199-page document would silently drop 99 pages.
+    vi.stubGlobal('fetch', headStub(200, '100'))
+    expect(await createStreamSource({ expectPages: 199, fallback })).toBeInstanceOf(MockStreamSource)
+  })
+
+  it('falls back when the endpoint is absent', async () => {
+    vi.stubGlobal('fetch', headStub(404))
+    expect(await createStreamSource({ expectPages: 199, fallback })).toBeInstanceOf(MockStreamSource)
+  })
+
+  it('falls back when the probe throws', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline') }) as unknown as typeof fetch)
+    expect(await createStreamSource({ expectPages: 199, fallback })).toBeInstanceOf(MockStreamSource)
+  })
+
+  it('honours forceMock without probing at all', async () => {
+    const f = headStub(200, '199')
+    vi.stubGlobal('fetch', f)
+    expect(await createStreamSource({ forceMock: true, expectPages: 199, fallback })).toBeInstanceOf(
+      MockStreamSource,
+    )
+    expect(f).not.toHaveBeenCalled()
   })
 })

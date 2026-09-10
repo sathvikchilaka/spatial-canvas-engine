@@ -3,6 +3,7 @@ import { stackedGeometry, type PageGeometry } from '@/data/geometry'
 import type { PageBitmap } from '@/data/pageRenderer'
 import type { DocumentSource } from '@/data/document'
 import { FunsdStreamSource } from '@/stream/funsdSource'
+import { createStreamSource } from '@/stream/sseSource'
 
 type ManifestPage = { id: string; w: number; h: number }
 
@@ -26,7 +27,10 @@ export async function createFunsdDocument(): Promise<DocumentSource> {
       return (await createImageBitmap(await img.blob())) as PageBitmap
     },
     createStream() {
-      return new FunsdStreamSource(pages.map((p) => p.id))
+      return createStreamSource({
+        expectPages: pages.length,
+        fallback: () => new FunsdStreamSource(pages.map((p) => p.id)),
+      })
     },
   }
 }

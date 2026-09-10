@@ -88,26 +88,39 @@ export class SseStreamSource implements StreamSource {
   }
 }
 
-/** Probes the endpoint; falls back to the in-app emitter when it is absent. */
-export async function createStreamSource(opts?: {
+/**
+ * Probes the endpoint and adopts the live transport only if it is both present
+ * and consistent with the document. A feed that disagrees on page count is
+ * worse than no feed — pages would go missing with no error anywhere — so
+ * disagreement falls back rather than being trusted.
+ *
+ * The endpoint exists only under `pnpm dev` (`vite.config.ts` proxies
+ * `/events`); `vite preview` and a static deploy have none. The fallback is
+ * therefore the normal path in production, not an error case.
+ */
+export async function createStreamSource(opts: {
+  fallback: () => StreamSource
   forceMock?: boolean
-  pageCount?: number
-  seed?: number
+  expectPages?: number
   url?: string
   onStatus?: (connected: boolean) => void
+  timeoutMs?: number
 }): Promise<StreamSource> {
-  const { MockStreamSource } = await import('./mockSource')
-  const pageCount = opts?.pageCount ?? 100
-  if (opts?.forceMock) return new MockStreamSource(pageCount, opts?.seed ?? 1)
-  const url = opts?.url ?? '/events'
+  if (opts.forceMock) return opts.fallback()
+  const url = opts.url ?? '/events'
   try {
     const ctrl = new AbortController()
-    const t = setTimeout(() => ctrl.abort(), 300)
+    const t = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 300)
     const res = await fetch(url, { method: 'HEAD', signal: ctrl.signal })
     clearTimeout(t)
-    if (res.ok) return new SseStreamSource(url, opts?.onStatus)
+    if (res.ok) {
+      const advertised = res.headers.get('X-Page-Count')
+      const agrees =
+        opts.expectPages === undefined || advertised === null || Number(advertised) === opts.expectPages
+      if (agrees) return new SseStreamSource(url, opts.onStatus)
+    }
   } catch {
-    // endpoint absent — fall through
+    // endpoint absent, blocked, or slow — fall through to the replay
   }
-  return new MockStreamSource(pageCount, opts?.seed ?? 1)
+  return opts.fallback()
 }

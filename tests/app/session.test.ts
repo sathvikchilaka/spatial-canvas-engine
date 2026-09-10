@@ -853,6 +853,90 @@ describe('labels', () => {
   })
 })
 
+describe('dirty shield end to end', () => {
+  /**
+   * Plan 2 (canvas-correctness) built the shield in `applyPageUpdate` and
+   * asserted it in isolation against `merge.ts`, but no live path ever drove
+   * it through a real `Session`: the mock/replay sources never redelivered a
+   * page for a node the reviewer had already edited. Task 4/5 wire up a real
+   * out-of-order feed where that can genuinely happen (a reconnect can
+   * redeliver a page already ingested), so this drives the real path — edit a
+   * node via the store, then feed a second `pageIngested` reply for the same
+   * id through the actual `WorkerClient` the session listens on (not a call
+   * into `merge.ts` directly) — and asserts both that `status.shielded`
+   * increments and that the human's edit is still what the reviewer sees.
+   */
+  it('shields a human edit from a late duplicate page delivery', async () => {
+    useStore.setState(
+      { edits: {}, dirtyAt: {}, selectedId: null, hoveredId: null, edgesAdded: [], edgesRemoved: [] },
+      true,
+    )
+    resetHistory()
+    vi.useFakeTimers()
+    try {
+      const s = new Session(canvas(), createSyntheticDocument(4, 1))
+      await s.ready
+      await s.connectStream()
+      for (let i = 0; i < 40 && s.nodes.count === 0; i++) await vi.advanceTimersByTimeAsync(50)
+      expect(s.nodes.count).toBeGreaterThan(0)
+
+      const id = s.nodes.ids[0]
+      const pageIndex = s.nodes.pages[0]
+
+      // The human edits the box.
+      commit('editBox', (d) => {
+        d.edits[id] = { rect: { x: 999, y: 998, w: 10, h: 10 } }
+        d.dirtyAt[id] = Date.now()
+      })
+      expect(s.rectOf(id)?.x).toBe(999)
+
+      const shieldedBefore = s.status.shielded
+      const pagesBefore = s.status.pagesReceived
+
+      // A late-arriving duplicate delivery for the same id, with a
+      // different rect — exactly what a reconnect-triggered redelivery of an
+      // already-ingested page would look like on the wire. This goes through
+      // the real `WorkerClient.receive` dispatch, the same path a genuine
+      // worker reply takes, so it exercises `Session.onPageIngested` for
+      // real rather than calling `applyPageUpdate` in isolation.
+      const dup: Res = {
+        id: -1,
+        kind: 'pageIngested',
+        pageIndex,
+        ids: Uint32Array.of(id),
+        coords: Float32Array.of(111, 222, 5, 5),
+        types: Uint8Array.of(s.nodes.types[0]),
+        parents: Int32Array.of(s.nodes.parents[0]),
+        order: Int32Array.of(s.nodes.order[0]),
+        edges: new Int32Array(0),
+        texts: [''],
+        labels: new Uint8Array(1),
+      } as PageIngested & { id: number }
+      ;(s.worker as unknown as { receive: (msg: Res) => void }).receive(dup)
+
+      expect(s.status.shielded).toBe(shieldedBefore + 1)
+      expect(s.status.pagesReceived).toBe(pagesBefore + 1)
+
+      // A subsequent store change (the same trigger every real edit or
+      // selection produces) re-asserts the human's edit over whatever the
+      // duplicate just pushed into the render arrays — the edit must not be
+      // the one that got clobbered.
+      useStore.setState({ hoveredId: null })
+      expect(s.rectOf(id)?.x).toBe(999)
+      expect(s.rectOf(id)?.y).toBe(998)
+
+      s.dispose()
+    } finally {
+      vi.useRealTimers()
+      useStore.setState(
+        { edits: {}, dirtyAt: {}, selectedId: null, hoveredId: null, edgesAdded: [], edgesRemoved: [] },
+        true,
+      )
+      resetHistory()
+    }
+  })
+})
+
 describe('inline payload ingest', () => {
   it('forwards a payload event to the worker without parsing it on this thread', async () => {
     const parseSpy = vi.spyOn(JSON, 'parse')

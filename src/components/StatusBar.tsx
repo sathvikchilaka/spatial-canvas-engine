@@ -1,3 +1,4 @@
+import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 
 type Props = {
@@ -12,6 +13,7 @@ type Props = {
   shielded: number
   connected: boolean
   done: boolean
+  transport: "sse" | "replay"
 }
 
 export function StatusBar({
@@ -24,6 +26,7 @@ export function StatusBar({
   shielded,
   connected,
   done,
+  transport,
 }: Props) {
   return (
     <footer className="flex items-center gap-4 border-t border-border bg-card px-4 py-1.5 font-mono text-xs text-muted-foreground">
@@ -34,6 +37,12 @@ export function StatusBar({
       <span className={cn(drawMs > 16 && "text-destructive")} title="worst repaint in last 500ms">
         {drawn === 0 ? "idle" : `${drawMs.toFixed(2)} ms draw`}
       </span>
+      <Badge
+        variant={transport === "sse" ? "default" : "secondary"}
+        className="text-[10px] uppercase tracking-wider"
+      >
+        {transport === "sse" ? "live sse" : "replay"}
+      </Badge>
       <span className="ml-auto flex items-center gap-1.5">
         <span
           className={cn(

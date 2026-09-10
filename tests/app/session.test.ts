@@ -788,11 +788,12 @@ describe('labels', () => {
 
       const id = s.nodes.ids[0]
       const baseType = s.nodes.types[0]
+      expect(baseType).not.toBe(NodeType.KeyValue)
 
-      s.setLabel(id, SemanticLabel.Header)
-      expect(s.labelOf(id)).toBe(SemanticLabel.Header)
-      expect(s.baseLabelOf(id)).not.toBe(SemanticLabel.Header)
-      expect(s.nodes.types[0]).toBe(NodeType.Paragraph)
+      s.setLabel(id, SemanticLabel.Question)
+      expect(s.labelOf(id)).toBe(SemanticLabel.Question)
+      expect(s.baseLabelOf(id)).not.toBe(SemanticLabel.Question)
+      expect(s.nodes.types[0]).toBe(NodeType.KeyValue)
       expect(useStore.getState().dirtyAt[id]).toBeGreaterThan(0)
 
       undo()
@@ -800,7 +801,7 @@ describe('labels', () => {
       expect(s.nodes.types[0]).toBe(baseType)
 
       redo()
-      expect(s.nodes.types[0]).toBe(NodeType.Paragraph)
+      expect(s.nodes.types[0]).toBe(NodeType.KeyValue)
       s.dispose()
     } finally {
       vi.useRealTimers()

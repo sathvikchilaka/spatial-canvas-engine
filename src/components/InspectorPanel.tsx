@@ -5,7 +5,13 @@ import { cn } from "@/lib/utils"
 import { setUiState, useStore } from "@/store/store"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { RowMeta } from "./TreeView"
-import { flattenInspectorTree, subtreeOf, type InspectorNode, type InspectorRow } from "./inspectorModel"
+import {
+  flattenInspectorTree,
+  jsonLineFor,
+  markdownLineFor,
+  subtreeOf,
+  type InspectorRow,
+} from "./inspectorModel"
 
 type Props = {
   nodes: NodeArrays | null
@@ -91,22 +97,6 @@ export function InspectorPanel({ nodes, version, meta, rectOf, onFocus }: Props)
   )
 }
 
-const r2 = (v: number) => Math.round(v * 100) / 100
-
-/** One row's text for the JSON-flavored rendering — compact, still valid-looking JSON per node. */
-function jsonLine(n: InspectorNode): string {
-  const rect = `{ "x": ${r2(n.rect.x)}, "y": ${r2(n.rect.y)}, "w": ${r2(n.rect.w)}, "h": ${r2(n.rect.h)} }`
-  return `{ "id": ${n.id}, "type": "${n.type}", "label": "${n.label}", "text": ${JSON.stringify(n.text)}, "rect": ${rect}, "modified": ${n.modified} }`
-}
-
-/** One row's text for the Markdown-flavored rendering — heading for branches, list item for leaves. */
-function markdownLine(n: InspectorNode, depth: number): string {
-  if (n.children.length === 0) return `- ${n.text || `#${n.id}`}${n.modified ? " *(edited)*" : ""}`
-  const head = "#".repeat(Math.min(6, depth + 2))
-  const name = n.label === "none" || n.label === "word" ? `#${n.id}` : n.label
-  return `${head} ${name}${n.modified ? " *(edited)*" : ""}`
-}
-
 /**
  * Renders one flattened subtree as clickable, individually-addressable rows.
  * Clicking a row selects that node via the store's `setUiState` (never raw
@@ -148,7 +138,7 @@ function RowPane({
             node.id === selectedId && "bg-accent text-accent-foreground",
           )}
         >
-          {variant === "json" ? jsonLine(node) : markdownLine(node, depth)}
+          {variant === "json" ? jsonLineFor(node) : markdownLineFor(node, depth)}
         </div>
       ))}
     </div>

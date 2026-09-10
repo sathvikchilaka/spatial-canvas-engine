@@ -109,6 +109,7 @@ export function App() {
       if (e.metaKey || e.ctrlKey || e.altKey) return
       const t = e.target as HTMLElement | null
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return
+      if (document.querySelector('[role="combobox"][data-state="open"]')) return
       const k = e.key.toLowerCase()
       const next: ToolName | null =
         k === "v" ? "select" : k === "o" ? "order" : k === "t" ? "table" : null

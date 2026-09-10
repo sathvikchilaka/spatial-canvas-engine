@@ -90,7 +90,18 @@ export function flattenInspectorTree(node: InspectorNode, depth = 0): InspectorR
 
 const r2 = (v: number) => Math.round(v * 100) / 100
 
-/** Pretty JSON with coordinates rounded — `104.00000762939453` is Float32 noise, not data. */
+/**
+ * One node's compact JSON line — the single implementation of "how one node
+ * renders" as JSON, shared by the per-row inspector panel and `toJson`'s
+ * nested dump. Coordinates are rounded: `104.00000762939453` is Float32 noise,
+ * not data.
+ */
+export function jsonLineFor(n: InspectorNode): string {
+  const rect = `{ "x": ${r2(n.rect.x)}, "y": ${r2(n.rect.y)}, "w": ${r2(n.rect.w)}, "h": ${r2(n.rect.h)} }`
+  return `{ "id": ${n.id}, "type": "${n.type}", "label": "${n.label}", "text": ${JSON.stringify(n.text)}, "rect": ${rect}, "modified": ${n.modified} }`
+}
+
+/** Pretty JSON with coordinates rounded — the nested-tree counterpart to `jsonLineFor`. */
 export function toJson(node: InspectorNode): string {
   const clean = (n: InspectorNode): unknown => ({
     id: n.id,
@@ -105,6 +116,21 @@ export function toJson(node: InspectorNode): string {
 }
 
 /**
+ * One node's Markdown rendering — heading + text body for a branch, list item
+ * for a leaf. The single implementation of "how one node renders" as
+ * Markdown, shared by the per-row inspector panel and `toMarkdown`'s prose
+ * walk. Always includes the node's text body when present, so a re-labeled
+ * or text-edited node is never silently dropped from either view.
+ */
+export function markdownLineFor(n: InspectorNode, depth: number, asLeaf = n.children.length === 0): string {
+  const edited = n.modified ? ' *(edited)*' : ''
+  if (asLeaf) return `- ${n.text || `#${n.id}`}${edited}`
+  const head = '#'.repeat(Math.min(6, depth + 2))
+  const name = n.label === 'none' || n.label === 'word' ? `#${n.id}` : n.label
+  return n.text ? `${head} ${name}${edited}\n\n${n.text}` : `${head} ${name}${edited}`
+}
+
+/**
  * The same tree as prose. Depth becomes heading level (capped at h6), text
  * becomes the body, and leaf children become a list — which is what a document
  * extraction actually reads like once it is correct.
@@ -112,13 +138,10 @@ export function toJson(node: InspectorNode): string {
 export function toMarkdown(node: InspectorNode): string {
   const out: string[] = []
   const walk = (n: InspectorNode, depth: number) => {
-    const head = '#'.repeat(Math.min(6, depth + 2))
-    const name = n.label === 'none' || n.label === 'word' ? `#${n.id}` : n.label
-    out.push(`${head} ${name}${n.modified ? ' *(edited)*' : ''}`, '')
-    if (n.text) out.push(n.text, '')
+    out.push(markdownLineFor(n, depth, false), '')
     const leaves = n.children.filter((c) => c.children.length === 0)
     const branches = n.children.filter((c) => c.children.length > 0)
-    for (const l of leaves) out.push(`- ${l.text || `#${l.id}`}${l.modified ? ' *(edited)*' : ''}`)
+    for (const l of leaves) out.push(markdownLineFor(l, depth + 1))
     if (leaves.length > 0) out.push('')
     for (const b of branches) walk(b, depth + 1)
   }

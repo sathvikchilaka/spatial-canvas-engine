@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { createNodeArrays, pushNode, NodeType } from '@/data/nodes'
 import { SemanticLabel } from '@/worker/protocol'
-import { flattenInspectorTree, subtreeOf, toJson, toMarkdown } from '@/components/inspectorModel'
+import {
+  flattenInspectorTree,
+  jsonLineFor,
+  markdownLineFor,
+  subtreeOf,
+  toJson,
+  toMarkdown,
+} from '@/components/inspectorModel'
 
 /** One question entity with two word children. */
 function form() {
@@ -104,5 +111,25 @@ describe('toMarkdown', () => {
   it('falls back to the id when there is no text', () => {
     const t = subtreeOf(form(), 1, { textOf: () => '', labelOf: () => SemanticLabel.None }, rectOf, () => false)!
     expect(toMarkdown(t)).toContain('#1')
+  })
+})
+
+describe('jsonLineFor / markdownLineFor', () => {
+  it('renders one compact JSON line, shared by the row view and toJson', () => {
+    const t = subtreeOf(form(), 1, meta, rectOf, () => false)!
+    const line = jsonLineFor(t)
+    expect(line).toContain('"id": 1')
+    expect(line).toContain('"label": "question"')
+    expect(JSON.parse(line).text).toBe('Name of company')
+  })
+
+  it('includes the text body line for a branch node, not just the heading', () => {
+    const t = subtreeOf(form(), 1, meta, rectOf, () => false)!
+    expect(markdownLineFor(t, 0, false)).toBe('## question\n\nName of company')
+  })
+
+  it('renders a leaf as a list item', () => {
+    const t = subtreeOf(form(), 1, meta, rectOf, () => false)!
+    expect(markdownLineFor(t.children[0], 1)).toBe('- Name')
   })
 })

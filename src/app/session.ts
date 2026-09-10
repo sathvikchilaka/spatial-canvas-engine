@@ -69,6 +69,8 @@ export class Session {
    */
   private readonly texts = new Map<number, string>()
   private readonly baseLabels = new Map<number, SemanticLabel>()
+  /** Node ids' `nodes.types` value as it was the first time a relabel overrode it. */
+  private readonly baseTypes = new Map<number, NodeType>()
   /** Ids the reviewer created. Far above any streamed id (`page * 1000 + n`). */
   private nextLocalId = 1_000_000_000
   /** Created nodes already pushed into `nodes` — pushes are irreversible, so this is the mirror. */
@@ -690,6 +692,8 @@ export class Session {
         if (i >= 0) {
           const wantType = TYPE_OF_LABEL[labelFromName(edit.label)]
           if (this.nodes.types[i] !== wantType) {
+            if (!this.baseTypes.has(id))
+              this.baseTypes.set(id, this.nodes.types[i] as NodeType)
             this.nodes.types[i] = wantType
           }
           this.labelOverridden.add(id)
@@ -700,15 +704,10 @@ export class Session {
       for (const id of this.labelOverridden) {
         if (edits[id]?.label !== undefined) continue
         this.labelOverridden.delete(id)
-        // Guard: for the synthetic document `baseLabelOf` is `None` →
-        // `NodeType.Paragraph`, which would flatten every `Line`/`Cell`
-        // back to `Paragraph` on revert. Only nodes with a real streamed
-        // label are touched.
-        if (!this.baseLabels.has(id)) continue
         const i = indexOfId(this.nodes, id)
         if (i < 0) continue
-        const baseType = TYPE_OF_LABEL[this.baseLabelOf(id)]
-        if (this.nodes.types[i] !== baseType) {
+        const baseType = this.baseTypes.get(id)
+        if (baseType !== undefined && this.nodes.types[i] !== baseType) {
           this.nodes.types[i] = baseType
         }
       }
@@ -786,6 +785,7 @@ export class Session {
     this.labelOverridden.clear()
     this.texts.clear()
     this.baseLabels.clear()
+    this.baseTypes.clear()
     this.created.clear()
     this.hidden.clear()
     this.engine.dispose()

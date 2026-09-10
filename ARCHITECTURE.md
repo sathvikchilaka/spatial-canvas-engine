@@ -161,9 +161,11 @@ Zustand store (`src/store/store.ts`) plus Immer:
   is stored as the label's **name**, not its enum ordinal, so the store stays legible in a patch
   dump and survives a change to the enum's numbering. `Session.labelOf` resolves human override
   over extraction, and `applyEdits` maps the effective label onto `nodes.types[i]` — a re-label
-  has to repaint the box, because the canvas is where the reviewer is looking. Nodes with no base
-  label (the synthetic corpus) are excluded from that mapping, so reverting an edit cannot flatten
-  a `Line` into a `Paragraph`.
+  has to repaint the box, because the canvas is where the reviewer is looking. The first time a
+  relabel overrides a node's type, `Session` remembers that pre-override value in `baseTypes`
+  (keyed by id); reverting an edit always restores from there, regardless of whether the node has
+  a real streamed label. So a `Line` relabeled and then undone returns to `Line`, and this holds
+  for the synthetic corpus (no base labels) just as it does for FUNSD.
   
   Text and labels live in `Map`s on the `Session`, not in the typed arrays: text is
   variable-length and non-numeric, and both are read by React chrome on selection rather than by

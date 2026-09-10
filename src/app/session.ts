@@ -275,40 +275,47 @@ export class Session {
    */
   private onPageIngested(p: PageIngested) {
     // Reconnect replays the whole feed from page 0 with no resume support —
-    // skip a page already ingested rather than re-pushing every node into
-    // `nodes`/`grid` as a ghost duplicate.
-    if (this.ingestedPages.has(p.pageIndex)) return
-    this.ingestedPages.add(p.pageIndex)
-    const indices = new Uint32Array(p.ids.length)
-    for (let i = 0; i < p.ids.length; i++) {
-      const c = i * 4
-      indices[i] = pushNode(this.nodes, {
-        id: p.ids[i],
-        page: p.pageIndex,
-        x: p.coords[c],
-        y: p.coords[c + 1],
-        w: p.coords[c + 2],
-        h: p.coords[c + 3],
-        type: p.types[i] as NodeType,
-        parent: p.parents[i],
-        order: p.order[i],
-      })
+    // a page already ingested must not re-push its nodes into `nodes`/`grid`
+    // as a ghost duplicate. But the redelivery is still a real event that
+    // may carry stale/reshuffled coordinates for an already-edited node, so
+    // it must still run through the dirty shield below rather than bail out
+    // entirely — that's the only end-to-end path that exercises the shield.
+    const isNewPage = !this.ingestedPages.has(p.pageIndex)
+    if (isNewPage) {
+      this.ingestedPages.add(p.pageIndex)
+      const indices = new Uint32Array(p.ids.length)
+      for (let i = 0; i < p.ids.length; i++) {
+        const c = i * 4
+        indices[i] = pushNode(this.nodes, {
+          id: p.ids[i],
+          page: p.pageIndex,
+          x: p.coords[c],
+          y: p.coords[c + 1],
+          w: p.coords[c + 2],
+          h: p.coords[c + 3],
+          type: p.types[i] as NodeType,
+          parent: p.parents[i],
+          order: p.order[i],
+        })
+      }
+      this.rememberBase(indices, p.coords)
+      for (let i = 0; i < p.ids.length; i++) {
+        const id = p.ids[i]
+        if (p.texts[i]) this.texts.set(id, p.texts[i])
+        if (p.labels[i]) this.baseLabels.set(id, p.labels[i] as SemanticLabel)
+      }
+      this.grid.addPage(p.pageIndex, p.ids, p.coords, indices)
+      if (p.edges.length > 0) {
+        appendEdges(this.baseEdges, p.edges)
+      }
+      this.orderDirty = true
     }
-    this.rememberBase(indices, p.coords)
-    for (let i = 0; i < p.ids.length; i++) {
-      const id = p.ids[i]
-      if (p.texts[i]) this.texts.set(id, p.texts[i])
-      if (p.labels[i]) this.baseLabels.set(id, p.labels[i] as SemanticLabel)
-    }
-    this.grid.addPage(p.pageIndex, p.ids, p.coords, indices)
-    if (p.edges.length > 0) {
-      appendEdges(this.baseEdges, p.edges)
-    }
-    this.orderDirty = true
 
     // Typed arrays straight in — no per-node object just to shield-merge them.
+    // Runs on every delivery (new or redelivered) so a redelivered page can
+    // still trip the shield against an edited node.
     const r = applyPageUpdate(p.pageIndex, p.ids, p.coords)
-    this.status.pagesReceived++
+    if (isNewPage) this.status.pagesReceived++
     this.status.shielded += r.shielded
     this.onStatusChange?.()
     this.engine.requestDraw()

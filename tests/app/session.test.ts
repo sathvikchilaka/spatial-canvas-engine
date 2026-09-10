@@ -857,14 +857,16 @@ describe('dirty shield end to end', () => {
   /**
    * A reconnect (`SseStreamSource` backs off and retries) can redeliver a page
    * already ingested — the dev SSE server has no resume support and restarts
-   * the shuffle from page 0. `Session.onPageIngested` now skips a page index
-   * it has already ingested, so a redelivery is a no-op: it must not push a
-   * duplicate row, must not bump `status.shielded`/`pagesReceived` again, and
-   * the human's edit — never touched by the skip — must still read back
-   * exactly as they left it. This drives the real path through the actual
-   * `WorkerClient` the session listens on, not a call into `merge.ts` directly.
+   * the shuffle from page 0. `Session.onPageIngested` skips re-pushing rows
+   * for a page index it has already ingested (no duplicate row, no double
+   * count of `pagesReceived`), but it must still run the redelivery through
+   * `applyPageUpdate` so the dirty shield gets a real chance to protect an
+   * edited node against the redelivered (possibly stale) coordinates —
+   * `status.shielded` must still increment. This drives the real path through
+   * the actual `WorkerClient` the session listens on, not a call into
+   * `merge.ts` directly.
    */
-  it('skips a late duplicate page delivery, leaving a human edit untouched', async () => {
+  it('shields an edited node against a late duplicate page delivery', async () => {
     useStore.setState(
       { edits: {}, dirtyAt: {}, selectedId: null, hoveredId: null, edgesAdded: [], edgesRemoved: [] },
       true,
@@ -913,9 +915,10 @@ describe('dirty shield end to end', () => {
       } as PageIngested & { id: number }
       ;(s.worker as unknown as { receive: (msg: Res) => void }).receive(dup)
 
-      // The page index was already ingested — the redelivery is skipped
-      // outright: no new row, no shield accounting, no status bump.
-      expect(s.status.shielded).toBe(shieldedBefore)
+      // The page index was already ingested — no duplicate row is pushed and
+      // `pagesReceived` isn't double-counted, but the shield still trips for
+      // the redelivered id since it carries a rect the human has overridden.
+      expect(s.status.shielded).toBe(shieldedBefore + 1)
       expect(s.status.pagesReceived).toBe(pagesBefore)
       expect(s.nodes.count).toBe(countBefore)
 

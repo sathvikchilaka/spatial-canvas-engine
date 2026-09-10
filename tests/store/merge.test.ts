@@ -55,7 +55,11 @@ describe('applyPageUpdate', () => {
     // link edit): the shield now keys on the rect override, so the stream is
     // free to overwrite geometry, and that write must still not be undoable.
     commit('move', (d) => { d.dirtyAt[1] = Date.now() })
-    applyPageUpdate(0, ...page({ id: 1, x: 50 }))
+    const r = applyPageUpdate(0, ...page({ id: 1, x: 50 }))
+    // The discriminating assertion: under the old `dirtyAt`-keyed predicate
+    // this node would have been shielded.
+    expect(r.shielded).toBe(0)
+    expect(r.applied).toBe(1)
     expect(useStore.getState().edits[1]).toBeUndefined()
     // Only the human's commit is on the stack — the stream write recorded
     // nothing, so one undo empties it.

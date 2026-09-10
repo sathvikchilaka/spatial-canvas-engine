@@ -75,14 +75,26 @@ on which kind of document is loaded:
     `ingestUrl` request without one leaking into the other's namespace.
 - **Transport (worker)**: native `postMessage`, typed request/response union
   (`src/worker/protocol.ts`).
-- **Transport (stream) — what actually ships**: both documents' `createStream()` return
-  *timer-driven, SSE-shaped replays* (`MockStreamSource`, `FunsdStreamSource`): out-of-order page
-  events behind the same `StreamSource` interface a network stream would implement, so nothing
-  downstream can tell the difference. A real `EventSource` client with exponential-backoff
-  reconnect exists (`src/stream/sseSource.ts`) and `server/sse.mjs` + `pnpm dev:sse` serve the
-  matching endpoint, but **nothing imports them** — `createStreamSource`'s endpoint probe is not
-  wired into `createStream()`, so the app never opens an `EventSource`. Stated plainly rather
-  than implied, because the ingest/backpressure claims below are measured on the replay path.
+- **Transport (stream)**: `StreamSource` emits `{ type: 'page', pageIndex, url }` **or**
+  `{ type: 'page', pageIndex, payload }` — a pointer the worker fetches itself, or a body a live
+  feed pushed inline. Both end at the same parser.
+
+  The live path is `SseStreamSource` over `EventSource` with exponential-backoff reconnect. Its
+  `onmessage` parses only a tiny envelope (`{"t":"p","i":12,"d":"<json string>"}`) and forwards `d`
+  **as a string** to the worker's `ingestJson`. That is the load-bearing detail: parsing a 40KB page
+  body on the main thread would reintroduce, once per page, exactly the long task this whole
+  architecture exists to remove. The main thread never sees a parsed document node.
+
+  `createStreamSource` HEAD-probes `/events` (300ms budget) and adopts the live source only if the
+  endpoint responds **and** its `X-Page-Count` matches the document's. A feed that disagrees is
+  worse than no feed — pages would go missing with no error surfaced anywhere — so it falls back to
+  the deterministic replay instead.
+
+  The endpoint is **dev-only**: `vite.config.ts` proxies `/events` to `server/sse.mjs` on the dev
+  server, and neither `vite preview` nor a static deploy has one. The replay is therefore the normal
+  production path, not a failure mode, and the status bar names which transport is live so the
+  distinction is never hidden. `pnpm dev:sse` starts the feed; it serves the FUNSD corpus, since
+  synthetic pages are generated inside the worker and have no body for a feed to push.
 - **Payload representation**: every page ingest reply is transferable typed arrays — `ids`
   (`Uint32Array`), `coords` (`Float32Array`, x/y/w/h at `i*4`), `types`, `parents`, `order`, and
   now **`edges`** (`Int32Array`, `[from, to]` pairs) — never arrays of per-node objects. The
@@ -321,6 +333,12 @@ design gap.
 - The shipped stream is an SSE-shaped replay, not a live `EventSource` (§2). The client and the
   dev server exist and the interface is the one a real endpoint would satisfy, but wiring the
   endpoint probe into `createStream()` is unfinished work, not a design position.
+- The SSE endpoint is a dev-server process, so the deployed demo runs the replay transport. Making
+  the live path reachable in production means hosting a long-lived process, which is a deployment
+  decision rather than an architectural one — the client is transport-agnostic either way.
+- The envelope is bespoke rather than a standard (`event:` names, `id:` for resume). Resume-on-
+  reconnect would need the server to remember what each client received; the replay's determinism
+  covers the demo's needs.
 - Sequence numbers are a DFS pre-order over a graph that is not required to be a tree. For a
   FUNSD question with three answers the numbering is one valid reading, not the only one; the
   brief asks the flow to be visible and editable, not to be linearised canonically.

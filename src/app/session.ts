@@ -479,8 +479,11 @@ export class Session {
         this.rememberBase(Uint32Array.of(i), this.nodes.coords.slice(c, c + 4))
         this.grid.insert(i, e.created.page, r.x, r.y, r.w, r.h)
         this.insertIndex(id, i)
-      } else if (this.created.has(id) && this.nodes.flags[i] & FLAG_HIDDEN) {
-        // Redo of a creation: unhide and re-index the row we kept.
+      } else if (this.created.has(id) && !e.deleted) {
+        // Redo of a creation: unhide and re-index the row we kept. A cell that
+        // is *also* `deleted` (split off, then merged away again) must stay
+        // hidden — unhiding it here would put a merged-away cell back into the
+        // draw loop and both indexes on the next unrelated store change.
         this.showNode(id, i)
       }
       this.created.add(id)
@@ -497,9 +500,11 @@ export class Session {
 
     for (const key of Object.keys(edits)) {
       const id = Number(key)
-      if (!edits[id]?.deleted || this.hidden.has(id)) continue
+      if (!edits[id]?.deleted) continue
       const i = indexOfId(this.nodes, id)
       if (i < 0) continue
+      // Reconcile against the flag rather than the mirror: `hideNode` is
+      // idempotent, so re-asserting every tick is cheap and cannot drift.
       this.hideNode(id, i)
       this.hidden.add(id)
     }
@@ -512,8 +517,14 @@ export class Session {
     }
   }
 
-  /** Hides a node and drops it from both spatial indexes, so it stops being hittable. */
+  /**
+   * Hides a node and drops it from both spatial indexes, so it stops being
+   * hittable. Idempotent: the flag is the single truth, so a second call adds
+   * no second `grid.remove`/`removeNode` — and neither does a call for a node
+   * two reconciliation loops both believe they own.
+   */
   private hideNode(id: number, i: number): void {
+    if (this.nodes.flags[i] & FLAG_HIDDEN) return
     const c = i * 4
     const r = {
       x: this.nodes.coords[c],
@@ -528,8 +539,13 @@ export class Session {
     })
   }
 
-  /** The exact inverse of `hideNode`: back into the draw loop and both indexes. */
+  /**
+   * The exact inverse of `hideNode`: back into the draw loop and both indexes.
+   * Idempotent for the same reason — a double insert would leave a duplicate
+   * QuadTree entry that a single later `removeNode` cannot clear.
+   */
   private showNode(id: number, i: number): void {
+    if (!(this.nodes.flags[i] & FLAG_HIDDEN)) return
     const c = i * 4
     this.nodes.flags[i] &= ~FLAG_HIDDEN
     this.grid.insert(

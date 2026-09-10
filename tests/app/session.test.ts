@@ -593,6 +593,78 @@ describe('structural edits', () => {
     }
   })
 
+  it('keeps a created-then-merged-away cell hidden across later store changes', async () => {
+    useStore.setState(
+      { edits: {}, dirtyAt: {}, selectedId: null, hoveredId: null, edgesAdded: [], edgesRemoved: [] },
+      true,
+    )
+    resetHistory()
+    workerStructural().length = 0
+    vi.useFakeTimers()
+    try {
+      const s = new Session(canvas(), createSyntheticDocument(4, 1))
+      await s.ready
+      await s.connectStream()
+      for (let i = 0; i < 40 && s.nodes.count === 0; i++) await vi.advanceTimersByTimeAsync(50)
+
+      const fresh = s.allocId()
+      const freshRect = { x: 10, y: 10, w: 20, h: 20 }
+      const out = new Uint32Array(4096)
+      const inGrid = (id: number, r: Rect) => {
+        const idx = indexOfId(s.nodes, id)
+        const n = s.grid.query(r.x, r.y, r.w, r.h, out)
+        for (let i = 0; i < n; i++) if (out[i] === idx) return true
+        return false
+      }
+
+      // Split off a cell, then merge that very cell away: its edit carries
+      // `created` *and* `deleted` at once.
+      commit('tableSplit', (d) => {
+        d.edits[fresh] = {
+          created: { page: 0, type: NodeType.Cell, parent: -1, order: 0 },
+          rect: freshRect,
+        }
+      })
+      commit('tableMerge', (d) => {
+        d.edits[fresh] = { ...d.edits[fresh], deleted: true }
+      })
+      expect(s.nodes.flags[indexOfId(s.nodes, fresh)] & FLAG_HIDDEN).toBe(FLAG_HIDDEN)
+      expect(inGrid(fresh, freshRect)).toBe(false)
+
+      // Undoing the merge brings it back exactly once. Two reconciliation
+      // passes both see it as theirs, and a double insert would leave a
+      // duplicate QuadTree entry that no single `removeNode` can clear.
+      workerStructural().length = 0
+      undo()
+      expect(s.nodes.flags[indexOfId(s.nodes, fresh)] & FLAG_HIDDEN).toBe(0)
+      expect(inGrid(fresh, freshRect)).toBe(true)
+      expect(workerStructural()).toEqual([{ kind: 'insertNode', nodeId: fresh }])
+
+      workerStructural().length = 0
+      redo()
+      expect(s.nodes.flags[indexOfId(s.nodes, fresh)] & FLAG_HIDDEN).toBe(FLAG_HIDDEN)
+      expect(workerStructural()).toEqual([{ kind: 'removeNode', nodeId: fresh }])
+
+      // Any later store change re-runs the materializer (a selection click
+      // does exactly this). A merged-away cell must not come back into the
+      // draw loop or either spatial index.
+      workerStructural().length = 0
+      useStore.setState({ hoveredId: 1 })
+      expect(s.nodes.flags[indexOfId(s.nodes, fresh)] & FLAG_HIDDEN).toBe(FLAG_HIDDEN)
+      expect(inGrid(fresh, freshRect)).toBe(false)
+      expect(workerStructural()).toEqual([])
+
+      s.dispose()
+    } finally {
+      vi.useRealTimers()
+      useStore.setState(
+        { edits: {}, dirtyAt: {}, selectedId: null, hoveredId: null, edgesAdded: [], edgesRemoved: [] },
+        true,
+      )
+      resetHistory()
+    }
+  })
+
   it('allocates ids monotonically and never reuses one', () => {
     const s = new Session(canvas(), createSyntheticDocument(1, 1))
     const a = s.allocId()

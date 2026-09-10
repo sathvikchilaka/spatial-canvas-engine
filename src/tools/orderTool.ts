@@ -48,6 +48,24 @@ export class OrderTool implements Tool {
     this.deps = deps
   }
 
+  /**
+   * `dragFrom` is set asynchronously inside `pick().then()`, so it is never
+   * true at `onPointerDown` return time — the adapter's `claimed` check reads
+   * this getter before that promise resolves. Because of that, `onUp` is
+   * never gated in from the app today (pre-existing; link commits are
+   * unreachable that way), so `dragFrom` must be cleared elsewhere: see
+   * `reset()`.
+   */
+  get capturing(): boolean {
+    return this.dragFrom !== null
+  }
+
+  /** Drops any in-flight link-drag state. Called when this tool stops owning the pointer. */
+  reset(): void {
+    this.dragFrom = null
+    this.cursor = null
+  }
+
   get linking(): { from: number; cursor: [number, number] } | null {
     return this.dragFrom === null || !this.cursor
       ? null

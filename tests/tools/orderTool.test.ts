@@ -94,3 +94,71 @@ describe('OrderTool edge toggle', () => {
     expect(isEdgePresent()).toBe(false)
   })
 })
+
+describe('OrderTool capturing / reset (NEW-2)', () => {
+  const deps = {
+    getRect: () => ({ x: 0, y: 0, w: 10, h: 10 }),
+    pick: vi.fn(),
+    requestDraw: vi.fn(),
+    hasEdge: vi.fn(),
+  }
+
+  beforeEach(() => {
+    useStore.setState({ edits: {}, dirtyAt: {}, selectedId: null, hoveredId: null, edgesAdded: [], edgesRemoved: [] }, true)
+    deps.pick.mockReset()
+    deps.hasEdge.mockReset()
+    deps.requestDraw.mockReset()
+  })
+
+  it('is not capturing until the async pick resolves, then is', async () => {
+    deps.pick.mockResolvedValueOnce(1)
+    const tool = new OrderTool(deps)
+    expect(tool.capturing).toBe(false)
+    tool.onPointerDown({ world: [0, 0] } as never)
+    // Synchronously right after onPointerDown, the promise has not resolved —
+    // this is exactly why the adapter cannot rely on a value snapshotted here.
+    expect(tool.capturing).toBe(false)
+    await Promise.resolve()
+    expect(tool.capturing).toBe(true)
+  })
+
+  it('reset() drops in-flight link state so an idle move stops chasing the cursor', async () => {
+    deps.pick.mockResolvedValueOnce(1)
+    const tool = new OrderTool(deps)
+    tool.onPointerDown({ world: [0, 0] } as never)
+    await Promise.resolve()
+    expect(tool.capturing).toBe(true)
+    expect(tool.linking).not.toBeNull()
+
+    tool.reset()
+
+    expect(tool.capturing).toBe(false)
+    expect(tool.linking).toBeNull()
+    // An idle move after reset still updates nothing draggable.
+    tool.onPointerMove({ world: [50, 50] } as never)
+    expect(tool.linking).toBeNull()
+  })
+
+  it('onPointerUp (as driven by a capturing-aware adapter) clears state and stops the rubber-band', async () => {
+    deps.pick.mockResolvedValueOnce(1).mockResolvedValueOnce(null)
+    const tool = new OrderTool(deps)
+    tool.onPointerDown({ world: [0, 0] } as never)
+    await Promise.resolve()
+    expect(tool.capturing).toBe(true)
+
+    // Idle moves before release do chase the cursor — that's the affordance.
+    tool.onPointerMove({ world: [20, 20] } as never)
+    expect(tool.linking).toEqual({ from: 1, cursor: [20, 20] })
+
+    tool.onPointerUp({ world: [20, 20] } as never)
+    await Promise.resolve()
+    expect(tool.capturing).toBe(false)
+    expect(tool.linking).toBeNull()
+
+    // Further idle moves after release no longer draw or chase anything.
+    deps.requestDraw.mockClear()
+    tool.onPointerMove({ world: [99, 99] } as never)
+    expect(tool.linking).toBeNull()
+    expect(deps.requestDraw).not.toHaveBeenCalled()
+  })
+})

@@ -242,6 +242,11 @@ export class Session {
   }
 
   setTool(name: ToolKind): void {
+    // Safety net for `OrderTool`: its gesture is normally cleared by `onUp`
+    // (the adapter now reads `capturing` fresh at up-time), but a pointer
+    // released outside the canvas never reaches it, so switching away must
+    // not leave a stale `dragFrom` chasing the cursor in a tool nobody sees.
+    if (this.toolName === 'order' && name !== 'order') this.orderTool.reset()
     this.toolName = name
     this.tool =
       name === 'order' ? this.orderTool : name === 'table' ? this.tableTool : this.selectTool
@@ -450,14 +455,22 @@ export class Session {
       // not run at pointer-move rate. And never mid-gesture — `adopt` refuses
       // that itself, this is just the cheaper path to the same answer.
       const editsChanged = state.edits !== prevEdits
-      prevEdits = state.edits
-      if (
-        editsChanged &&
-        this.toolName === 'table' &&
-        this.tableTool.tableId !== null &&
-        !this.tableTool.capturing
-      ) {
-        void this.tableTool.adopt(this.tableTool.tableId)
+      const tableActive = this.toolName === 'table' && this.tableTool.tableId !== null
+      if (editsChanged && tableActive && this.tableTool.capturing) {
+        // Refused: do NOT advance `prevEdits`. A geometry-moving change that
+        // arrives mid-drag (e.g. a keyboard undo while the pointer is held)
+        // would otherwise consume its own change signal here and then be
+        // skipped by `adopt`'s own `capturing` guard too. The gesture's
+        // `commit()` normally re-adopts right after and this catches up on
+        // its own — but `onPointerUp` returns early when it commits nothing
+        // (press-and-release on a divider, or a drag back to the start), so
+        // leaving the signal pending lets the *next* store change (whatever
+        // it is) still see the diff and trigger the catch-up adopt, instead
+        // of the mesh being left drawing dividers that no longer match the
+        // arrays `applyEdits` just rewrote underneath it.
+      } else {
+        prevEdits = state.edits
+        if (editsChanged && tableActive) void this.tableTool.adopt(this.tableTool.tableId)
       }
       this.orderDirty = true
       this.engine.requestDraw()

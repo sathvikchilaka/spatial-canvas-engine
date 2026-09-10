@@ -2,7 +2,7 @@ import type { Rect } from '@/data/nodes'
 import { drawSelectionHud } from '@/engine/layers/hud'
 import type { Viewport } from '@/engine/viewport'
 import { commit, setUiState, useStore } from '@/store/store'
-import type { Tool, ToolEvent } from './types'
+import { HANDLE_SLOP_PX, type Tool, type ToolEvent } from './types'
 
 export type Arrow = { x1: number; y1: number; x2: number; y2: number; headAngle: number }
 
@@ -74,6 +74,8 @@ export type OrderToolDeps = {
   pick(wx: number, wy: number): Promise<number | null>
   requestDraw(): void
   hasEdge(from: number, to: number): boolean
+  /** The arrows the overlay painted last frame — the endpoint hit-test candidates. */
+  arrows(): { list: readonly ArrowRecord[]; count: number }
 }
 
 /** Drag from a selected box onto another to make it the successor. */
@@ -82,6 +84,7 @@ export class OrderTool implements Tool {
   readonly ephemeralRect = null
   private dragFrom: number | null = null
   private cursor: [number, number] | null = null
+  private reparent: { endpoint: EdgeEndpoint; cursor: [number, number] } | null = null
   private deps: OrderToolDeps
 
   constructor(deps: OrderToolDeps) {
@@ -97,13 +100,14 @@ export class OrderTool implements Tool {
    * `reset()`.
    */
   get capturing(): boolean {
-    return this.dragFrom !== null
+    return this.reparent !== null || this.dragFrom !== null
   }
 
-  /** Drops any in-flight link-drag state. Called when this tool stops owning the pointer. */
+  /** Drops any in-flight link-drag or re-parent state. Called when this tool stops owning the pointer. */
   reset(): void {
     this.dragFrom = null
     this.cursor = null
+    this.reparent = null
   }
 
   get linking(): { from: number; cursor: [number, number] } | null {
@@ -112,7 +116,20 @@ export class OrderTool implements Tool {
       : { from: this.dragFrom, cursor: this.cursor }
   }
 
+  /** In-flight endpoint drag, for the HUD and tests. */
+  get dragging(): { endpoint: EdgeEndpoint; cursor: [number, number] } | null {
+    return this.reparent
+  }
+
   onPointerDown(e: ToolEvent): void {
+    const { list, count } = this.deps.arrows()
+    const grabbed = hitEndpoint(list, count, e.world[0], e.world[1], HANDLE_SLOP_PX / e.scale)
+    if (grabbed) {
+      // Grabbing a live arrow endpoint is a re-parent, not a new link.
+      this.reparent = { endpoint: grabbed, cursor: [e.world[0], e.world[1]] }
+      this.deps.requestDraw()
+      return
+    }
     void this.deps.pick(e.world[0], e.world[1]).then((id) => {
       if (id === null) return
       this.dragFrom = id
@@ -123,12 +140,26 @@ export class OrderTool implements Tool {
   }
 
   onPointerMove(e: ToolEvent): void {
+    if (this.reparent) {
+      this.reparent.cursor = [e.world[0], e.world[1]]
+      this.deps.requestDraw()
+      return
+    }
     if (this.dragFrom === null) return
     this.cursor = [e.world[0], e.world[1]]
     this.deps.requestDraw()
   }
 
   onPointerUp(e: ToolEvent): void {
+    const rp = this.reparent
+    this.reparent = null
+    if (rp) {
+      void this.deps.pick(e.world[0], e.world[1]).then((target) => {
+        this.commitReparent(rp.endpoint, target)
+        this.deps.requestDraw()
+      })
+      return
+    }
     const from = this.dragFrom
     this.dragFrom = null
     this.cursor = null
@@ -146,21 +177,78 @@ export class OrderTool implements Tool {
     })
   }
 
+  /**
+   * Removing the old edge and adding the new one in a *single* `commit` is the
+   * whole point: a re-parent is one reviewer intent, so it must be one undo
+   * step. Two commits would make Cmd+Z leave the graph disconnected.
+   */
+  private commitReparent(endpoint: EdgeEndpoint, target: number | null): void {
+    if (target === null) return
+    const { from, to, end } = endpoint
+    const next: [number, number] = end === 'head' ? [from, target] : [target, to]
+    // No-op drops: back onto the same node, or onto the other end (a self-edge).
+    if (next[0] === next[1]) return
+    if (next[0] === from && next[1] === to) return
+
+    commit('reparent', (d) => {
+      d.edgesRemoved = [...d.edgesRemoved, [from, to]]
+      d.edgesAdded = [...d.edgesAdded, next]
+      d.dirtyAt[next[0]] = Date.now()
+    })
+  }
+
   drawHud(ctx: CanvasRenderingContext2D, vp: Viewport): void {
     const id = useStore.getState().selectedId
     const rect = id === null ? null : this.deps.getRect(id)
     if (rect) drawSelectionHud(ctx, rect, vp.scale)
     const link = this.linking
-    if (!link) return
-    const from = this.deps.getRect(link.from)
-    if (!from) return
-    ctx.save()
-    ctx.strokeStyle = 'rgba(255, 210, 90, 0.95)'
-    ctx.lineWidth = 2 / vp.scale
-    ctx.beginPath()
-    ctx.moveTo(from.x + from.w / 2, from.y + from.h / 2)
-    ctx.lineTo(link.cursor[0], link.cursor[1])
-    ctx.stroke()
-    ctx.restore()
+    if (link) {
+      const from = this.deps.getRect(link.from)
+      if (from) {
+        ctx.save()
+        ctx.strokeStyle = 'rgba(255, 210, 90, 0.95)'
+        ctx.lineWidth = 2 / vp.scale
+        ctx.beginPath()
+        ctx.moveTo(from.x + from.w / 2, from.y + from.h / 2)
+        ctx.lineTo(link.cursor[0], link.cursor[1])
+        ctx.stroke()
+        ctx.restore()
+      }
+    }
+
+    // Re-parent rubber band: anchored at the end that is NOT moving.
+    if (this.reparent) {
+      const { from, to, end } = this.reparent.endpoint
+      const anchor = this.deps.getRect(end === 'head' ? from : to)
+      if (anchor) {
+        ctx.save()
+        ctx.strokeStyle = 'rgba(255, 140, 90, 0.95)'
+        ctx.lineWidth = 2 / vp.scale
+        ctx.setLineDash([6 / vp.scale, 4 / vp.scale])
+        ctx.beginPath()
+        ctx.moveTo(anchor.x + anchor.w / 2, anchor.y + anchor.h / 2)
+        ctx.lineTo(this.reparent.cursor[0], this.reparent.cursor[1])
+        ctx.stroke()
+        ctx.restore()
+      }
+    }
+
+    // Endpoint handles, so it is visible that arrows are grabbable at all.
+    const { list, count } = this.deps.arrows()
+    if (count > 0) {
+      const r = 3 / vp.scale
+      ctx.save()
+      ctx.fillStyle = 'rgba(255, 210, 90, 0.9)'
+      ctx.beginPath()
+      for (let i = 0; i < count; i++) {
+        const a = list[i]
+        ctx.moveTo(a.x2 + r, a.y2)
+        ctx.arc(a.x2, a.y2, r, 0, Math.PI * 2)
+        ctx.moveTo(a.x1 + r, a.y1)
+        ctx.arc(a.x1, a.y1, r, 0, Math.PI * 2)
+      }
+      ctx.fill()
+      ctx.restore()
+    }
   }
 }

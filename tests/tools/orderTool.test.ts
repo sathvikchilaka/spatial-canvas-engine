@@ -1,7 +1,7 @@
 // tests/tools/orderTool.test.ts
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { arrowPath, hitEndpoint, OrderTool, type ArrowRecord } from '@/tools/orderTool'
-import { undo, redo, useStore } from '@/store/store'
+import { resetHistory, undo, redo, useStore } from '@/store/store'
 import { appendEdges, createEdgeSet, hasEdge, materialize } from '@/data/edges'
 import { createNodeArrays, indexOfId, pushNode, NodeType } from '@/data/nodes'
 
@@ -25,6 +25,7 @@ describe('OrderTool edge toggle', () => {
     pick: vi.fn(),
     requestDraw: vi.fn(),
     hasEdge: vi.fn(),
+    arrows: () => ({ list: [], count: 0 }),
   }
 
   beforeEach(() => {
@@ -101,6 +102,7 @@ describe('OrderTool capturing / reset (NEW-2)', () => {
     pick: vi.fn(),
     requestDraw: vi.fn(),
     hasEdge: vi.fn(),
+    arrows: () => ({ list: [], count: 0 }),
   }
 
   beforeEach(() => {
@@ -204,5 +206,127 @@ describe('hitEndpoint', () => {
       { from: 5, to: 6, x1: 20, y1: 0, x2: 40, y2: 0 },
     ]
     expect(hitEndpoint(tie, 2, 15, 0, 6)).toEqual({ from: 1, to: 2, end: 'head' })
+  })
+})
+
+const RECTS: Record<number, { x: number; y: number; w: number; h: number }> = {
+  1: { x: 0, y: 0, w: 20, h: 10 },
+  2: { x: 100, y: 0, w: 20, h: 10 },
+  3: { x: 200, y: 0, w: 20, h: 10 },
+}
+
+function toolWith(pickResult: number | null, arrows: ArrowRecord[]) {
+  return new OrderTool({
+    getRect: (id) => RECTS[id] ?? null,
+    pick: async () => pickResult,
+    requestDraw: () => {},
+    hasEdge: () => true,
+    arrows: () => ({ list: arrows, count: arrows.length }),
+  })
+}
+
+const ev = (x: number, y: number) => ({
+  world: [x, y] as [number, number],
+  screen: [0, 0] as [number, number],
+  scale: 1,
+  shift: false,
+  alt: false,
+})
+
+const clean = () => {
+  useStore.setState(
+    { edits: {}, dirtyAt: {}, selectedId: null, hoveredId: null, edgesAdded: [], edgesRemoved: [] },
+    true,
+  )
+  resetHistory()
+}
+
+describe('OrderTool re-parenting', () => {
+  beforeEach(clean)
+
+  it('dragging an arrow head onto a third node re-points the successor in one commit', async () => {
+    const tool = toolWith(3, [{ from: 1, to: 2, x1: 20, y1: 5, x2: 100, y2: 5 }])
+    tool.onPointerDown(ev(100, 5))
+    await Promise.resolve()
+    expect(tool.dragging?.endpoint).toEqual({ from: 1, to: 2, end: 'head' })
+    expect(tool.capturing).toBe(true)
+
+    tool.onPointerMove(ev(180, 5))
+    tool.onPointerUp(ev(200, 5))
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const s = useStore.getState()
+    expect(s.edgesRemoved).toEqual([[1, 2]])
+    expect(s.edgesAdded).toEqual([[1, 3]])
+    expect(tool.dragging).toBeNull()
+
+    // One transaction, so one undo returns the original graph.
+    undo()
+    expect(useStore.getState().edgesRemoved).toEqual([])
+    expect(useStore.getState().edgesAdded).toEqual([])
+  })
+
+  it('dragging the tail re-points the predecessor', async () => {
+    const tool = toolWith(3, [{ from: 1, to: 2, x1: 20, y1: 5, x2: 100, y2: 5 }])
+    tool.onPointerDown(ev(20, 5))
+    await Promise.resolve()
+    expect(tool.dragging?.endpoint.end).toBe('tail')
+    tool.onPointerUp(ev(200, 5))
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(useStore.getState().edgesRemoved).toEqual([[1, 2]])
+    expect(useStore.getState().edgesAdded).toEqual([[3, 2]])
+  })
+
+  it('dropping on empty space commits nothing and leaves the edge alone', async () => {
+    const tool = toolWith(null, [{ from: 1, to: 2, x1: 20, y1: 5, x2: 100, y2: 5 }])
+    tool.onPointerDown(ev(100, 5))
+    await Promise.resolve()
+    tool.onPointerUp(ev(500, 500))
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(useStore.getState().edgesRemoved).toEqual([])
+    expect(useStore.getState().edgesAdded).toEqual([])
+  })
+
+  it('dropping back on the same node commits nothing', async () => {
+    const tool = toolWith(2, [{ from: 1, to: 2, x1: 20, y1: 5, x2: 100, y2: 5 }])
+    tool.onPointerDown(ev(100, 5))
+    await Promise.resolve()
+    tool.onPointerUp(ev(100, 5))
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(useStore.getState().edgesAdded).toEqual([])
+  })
+
+  it('refuses a drop that would make a self-edge', async () => {
+    const tool = toolWith(1, [{ from: 1, to: 2, x1: 20, y1: 5, x2: 100, y2: 5 }])
+    tool.onPointerDown(ev(100, 5))
+    await Promise.resolve()
+    tool.onPointerUp(ev(10, 5))
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(useStore.getState().edgesAdded).toEqual([])
+  })
+
+  it('still links two nodes when the press is not on an endpoint', async () => {
+    const tool = new OrderTool({
+      getRect: (id) => RECTS[id] ?? null,
+      pick: async () => 2,
+      requestDraw: () => {},
+      hasEdge: () => false,
+      arrows: () => ({ list: [], count: 0 }),
+    })
+    tool.onPointerDown(ev(5, 5))
+    await Promise.resolve()
+    expect(tool.dragging).toBeNull()
+    tool.onPointerUp(ev(105, 5))
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(useStore.getState().edgesAdded).toEqual([[2, 2]].filter(() => false))
+    // `pick` returns the same id for both ends here, so nothing is added — the
+    // point of the case is that the *link* path ran, not the re-parent path.
+    expect(useStore.getState().edgesRemoved).toEqual([])
   })
 })

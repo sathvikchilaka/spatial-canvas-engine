@@ -32,7 +32,7 @@
 - Produces: `export function sequenceNumbers(set: EdgeSet, nodes: NodeArrays): Map<number, number>` — node **id** → 1-based reading position. Roots (in-degree 0) are visited in ascending `nodes.order` then ascending id; each root's subtree is emitted depth-first, children in ascending id. Nodes in a cycle, or unreachable from any root, are appended after the acyclic walk in ascending id order so every node in the edge set gets a number. Nodes with no edges at all are absent from the map.
 - Produces: `EdgeSet` gains `sequence: Map<number, number>`, populated by `materialize` so the overlay never computes it.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/data/edges.test.ts`:
 
@@ -125,12 +125,12 @@ describe('sequenceNumbers', () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `pnpm test -- tests/data/edges.test.ts`
 Expected: FAIL — `sequenceNumbers` is not exported, and `out.sequence` is undefined.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `src/data/edges.ts`, extend the type:
 
@@ -222,12 +222,12 @@ And in `materialize`, just before `return out`:
   out.sequence = sequenceNumbers(out, nodes)
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `pnpm test -- tests/data/edges.test.ts && pnpm typecheck`
 Expected: PASS (9 cases).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/data/edges.ts tests/data/edges.test.ts
@@ -248,7 +248,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - Consumes: `EdgeSet.sequence` (Task 1).
 - No new exports. `drawBadges` keeps its signature.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/engine/orderOverlay.test.ts` (reuse the file's existing fake-context helper and node builder; the names below assume `recordingContext()` and `nodesWith()` — if the existing file names them differently, use those):
 
@@ -285,12 +285,12 @@ describe('sequence badges', () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `pnpm test -- tests/engine/orderOverlay.test.ts`
 Expected: FAIL — the first test gets `['2', ...]` (out-degree of node 10), and the second paints nothing only by accident of `targets.length === 0`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Replace `drawBadges` in `src/engine/layers/overlays.ts`:
 
@@ -324,12 +324,12 @@ Replace `drawBadges` in `src/engine/layers/overlays.ts`:
   }
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `pnpm test && pnpm typecheck`
 Expected: PASS. If an existing overlay test asserted an out-degree string, update it — that assertion encoded the bug.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/engine/layers/overlays.ts tests/engine/orderOverlay.test.ts
@@ -354,7 +354,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - Produces in `src/engine/layers/overlays.ts`:
   - `OrderOverlay.arrows: readonly ArrowRecord[]` and `OrderOverlay.arrowCount: number` — the arrows the last `draw` actually painted. Written into a pre-allocated, reused array of pre-allocated records; no per-frame allocation.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/tools/orderTool.test.ts`:
 
@@ -406,12 +406,12 @@ describe('hitEndpoint', () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `pnpm test -- tests/tools/orderTool.test.ts`
 Expected: FAIL — `hitEndpoint` is not exported.
 
-- [ ] **Step 3: Implement `hitEndpoint`**
+- [x] **Step 3: Implement `hitEndpoint`**
 
 Append to `src/tools/orderTool.ts`:
 
@@ -459,7 +459,7 @@ export function hitEndpoint(
 
 `<=` on the head and `<` on the tail is what implements the tie preference; keep both.
 
-- [ ] **Step 4: Record the painted arrows in the overlay**
+- [x] **Step 4: Record the painted arrows in the overlay**
 
 In `src/engine/layers/overlays.ts`:
 
@@ -507,12 +507,12 @@ And inside the inner arrow loop, right after `ctx.fill()` / before `drawn++`:
 
 `budget` is already `<= MAX_ARROWS`, so `this.arrows[drawn]` is always in range.
 
-- [ ] **Step 5: Run tests**
+- [x] **Step 5: Run tests**
 
 Run: `pnpm test && pnpm typecheck && pnpm lint`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/tools/orderTool.ts src/engine/layers/overlays.ts tests/tools/orderTool.test.ts
@@ -542,7 +542,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
   - Dropping on the node already at that end, or on empty space, or on a node that would make a self-edge, commits nothing.
   Pointer-down *not* on an endpoint keeps the existing link/unlink drag behaviour unchanged.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/tools/orderTool.test.ts`:
 
@@ -673,12 +673,12 @@ describe('OrderTool re-parenting', () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `pnpm test -- tests/tools/orderTool.test.ts`
 Expected: FAIL — `arrows` is not a valid dep and `tool.dragging` is undefined.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `src/tools/orderTool.ts`, extend the deps and the class:
 
@@ -840,7 +840,7 @@ and, so the handles are discoverable, a dot on every painted endpoint:
 
 One `beginPath`/`fill` for every handle — the endpoint dots must not become 600 draw calls.
 
-- [ ] **Step 4: Wire the dep in `src/app/session.ts`**
+- [x] **Step 4: Wire the dep in `src/app/session.ts`**
 
 In the `new OrderTool({...})` call add:
 
@@ -853,7 +853,7 @@ In the `new OrderTool({...})` call add:
 
 If `orderOverlay` is not already a public field on `Engine`, expose it the way `pageLayer` is exposed (`readonly orderOverlay = new OrderOverlay()`), and pass it to the draw path exactly as before.
 
-- [ ] **Step 5: Run tests**
+- [x] **Step 5: Run tests**
 
 Run: `pnpm test && pnpm typecheck && pnpm lint`
 Expected: PASS.
@@ -862,7 +862,7 @@ Expected: PASS.
 
 Run: `pnpm dev`, pick **FUNSD · 199pp · 41k boxes**, press `O`, zoom to ~120% until arrows and their endpoint dots are visible. Drag an arrowhead onto another box — the arrow re-points, `Cmd+Z` restores it in one step. Drag a tail onto a third box — the predecessor changes. Confirm the badges renumber after each commit (the graph is re-materialized, so `sequence` is rebuilt).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/tools/orderTool.ts src/app/session.ts tests/tools/orderTool.test.ts

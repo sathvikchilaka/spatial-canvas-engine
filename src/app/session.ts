@@ -113,6 +113,10 @@ export class Session {
       pick: (x, y) => this.worker.hitTest(x, y),
       requestDraw: () => this.engine.requestDraw(),
       hasEdge: (f, t) => hasEdge(this.effectiveEdges, f, t),
+      arrows: () => ({
+        list: this.orderOverlay.arrows,
+        count: this.orderOverlay.arrowCount,
+      }),
     })
     this.tableTool = new TableTool({
       tableAt: (id) => this.tableAt(id),

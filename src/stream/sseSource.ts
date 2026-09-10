@@ -1,16 +1,34 @@
 import type { StreamEvent, StreamSource } from './source'
 
 /**
- * NOT WIRED. Both `DocumentSource.createStream()` implementations return the
- * timer-driven, SSE-shaped replays instead, so nothing in the app imports this
- * module and `server/sse.mjs` / `pnpm dev:sse` are only reachable by hand. Kept
- * because it is the transport the `StreamSource` interface was shaped for; see
- * ARCHITECTURE.md §2 ("Transport (stream)"), which says so rather than
- * implying the EventSource path runs.
+ * The wire envelope, kept deliberately tiny: `t` for type, `i` for page index,
+ * `d` for the page body as a string. Only the envelope is parsed on the main
+ * thread; the body — tens of KB per page — is forwarded to the worker
+ * untouched, which is what keeps ingest off the 16ms budget.
  */
 
 const RECONNECT_BASE_MS = 500
 const RECONNECT_MAX_MS = 8000
+
+/**
+ * Parses only the envelope — never the page body — and returns a
+ * `StreamEvent`, or null when the envelope itself is malformed.
+ */
+export function parseSseEnvelope(data: string): StreamEvent | null {
+  let env: unknown
+  try {
+    env = JSON.parse(data)
+  } catch {
+    return null
+  }
+  if (typeof env !== 'object' || env === null) return null
+  const e = env as { t?: unknown; i?: unknown; d?: unknown }
+  if (e.t === 'd') return { type: 'done' }
+  if (e.t !== 'p') return null
+  if (typeof e.i !== 'number' || !Number.isInteger(e.i) || e.i < 0) return null
+  if (typeof e.d !== 'string') return null
+  return { type: 'page', pageIndex: e.i, payload: e.d }
+}
 
 /** EventSource client with exponential-backoff reconnect. */
 export class SseStreamSource implements StreamSource {
@@ -55,11 +73,9 @@ export class SseStreamSource implements StreamSource {
       this.onStatus?.(true)
     }
     es.onmessage = (ev) => {
-      try {
-        this.handler?.(JSON.parse(ev.data) as StreamEvent)
-      } catch {
-        // Malformed payload: drop it. One bad page never poisons the document.
-      }
+      const parsed = parseSseEnvelope(ev.data)
+      // Malformed payload: drop it. One bad page never poisons the document.
+      if (parsed) this.handler?.(parsed)
     }
     es.onerror = () => {
       es.close()

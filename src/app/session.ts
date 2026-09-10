@@ -5,7 +5,7 @@ import { BucketGrid } from '@/engine/bucketGrid'
 import { CanvasEngine } from '@/engine/engine'
 import { attachInput } from '@/engine/input'
 import { screenToWorld } from '@/engine/viewport'
-import { redo, undo, useStore, type AppState, type Edit } from '@/store/store'
+import { redo, setUiState, undo, useStore, type AppState, type Edit } from '@/store/store'
 import { toolHandlers } from '@/tools/adapter'
 import { OrderTool } from '@/tools/orderTool'
 import { SelectTool } from '@/tools/selectTool'
@@ -349,7 +349,7 @@ export class Session {
           .hitTest(wx, wy)
           .then((id) => {
             if (this.disposed) return
-            if (useStore.getState().hoveredId !== id) useStore.setState({ hoveredId: id })
+            if (useStore.getState().hoveredId !== id) setUiState({ hoveredId: id })
           })
           .catch((err) => {
             if (!this.disposed) throw err

@@ -1,7 +1,7 @@
 import type { Rect } from '@/data/nodes'
 import type { Viewport } from '@/engine/viewport'
 import { NodeType } from '@/data/nodes'
-import { commit, useStore } from '@/store/store'
+import { commit, setUiState, useStore } from '@/store/store'
 import {
   buildMesh,
   cellRect,
@@ -123,7 +123,7 @@ export class TableTool implements Tool {
       const prev = useStore.getState().selectedId
       // Remember the previous cell so `M` has something to merge with.
       this.mergePartner = prev !== null && prev !== id ? prev : null
-      useStore.setState({ selectedId: id })
+      setUiState({ selectedId: id })
       void this.adopt(id)
     })
   }

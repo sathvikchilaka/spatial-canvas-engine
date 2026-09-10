@@ -1,7 +1,7 @@
 import type { Rect } from '@/data/nodes'
 import type { Viewport } from '@/engine/viewport'
 import { drawSelectionHud } from '@/engine/layers/hud'
-import { beginCoalesce, commit, endCoalesce, useStore } from '@/store/store'
+import { beginCoalesce, commit, endCoalesce, setUiState, useStore } from '@/store/store'
 import {
   HANDLE_SLOP_PX, MIN_SIZE, SNAP_TOLERANCE_PX,
   type Handle, type Tool, type ToolEvent,
@@ -162,7 +162,7 @@ export class SelectTool implements Tool {
       return
     }
     void this.deps.pick(e.world[0], e.world[1]).then((id) => {
-      useStore.setState({ selectedId: id })
+      setUiState({ selectedId: id })
       this.deps.requestDraw()
     })
   }

@@ -108,3 +108,11 @@ export function endCoalesce(): void {
 export function resetHistory(): void {
   history.clear()
 }
+
+/**
+ * Selection/hover are UI-only, never undoable, and must never invalidate the
+ * history of real edits (a click after a drag shouldn't wipe undo).
+ */
+export function setUiState(partial: Partial<Pick<AppState, 'selectedId' | 'hoveredId'>>): void {
+  runInternal(() => useStore.setState(partial))
+}

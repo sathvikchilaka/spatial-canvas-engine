@@ -1,6 +1,6 @@
 // tests/store/history.test.ts
 import { describe, it, expect, beforeEach } from 'vitest'
-import { useStore, commit, applyStream, undo, redo, canUndo, canRedo, HISTORY_LIMIT } from '@/store/store'
+import { useStore, commit, applyStream, undo, redo, canUndo, canRedo, setUiState, HISTORY_LIMIT } from '@/store/store'
 
 const reset = () =>
   useStore.setState(
@@ -72,6 +72,15 @@ describe('history', () => {
     undo()
     undo()
     expect(useStore.getState().edgesAdded).toEqual([])
+  })
+
+  it('does not clear history on a selection/hover change (setUiState)', () => {
+    commit('move', (d) => { d.edits[1] = { rect: { x: 5, y: 5, w: 10, h: 10 } } })
+    setUiState({ selectedId: 1 })
+    setUiState({ hoveredId: 2 })
+    expect(canUndo()).toBe(true)
+    undo()
+    expect(useStore.getState().edits[1]).toBeUndefined()
   })
 
   it('coalesces rapid same-key edits into one entry', () => {

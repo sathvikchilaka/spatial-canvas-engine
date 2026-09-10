@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { NodeType, indexOfId, type NodeArrays } from "@/data/nodes"
 import { cn } from "@/lib/utils"
-import { useStore } from "@/store/store"
+import { setUiState, useStore } from "@/store/store"
 
 export type TreeRow = {
   id: number
@@ -158,7 +158,7 @@ export function TreeView({ nodes, version, onFocus }: Props) {
         ref={scrollRef}
         className="min-h-0 flex-1 overflow-y-auto"
         onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
-        onMouseLeave={() => useStore.setState({ hoveredId: null })}
+        onMouseLeave={() => setUiState({ hoveredId: null })}
       >
         <div style={{ height: rows.length * ROW_H, position: "relative" }}>
           {slice.map((row, i) => {
@@ -174,9 +174,9 @@ export function TreeView({ nodes, version, onFocus }: Props) {
                   row.id === selectedId && "bg-accent text-accent-foreground",
                   row.id === hoveredId && row.id !== selectedId && "bg-muted",
                 )}
-                onMouseEnter={() => useStore.setState({ hoveredId: row.id })}
+                onMouseEnter={() => setUiState({ hoveredId: row.id })}
                 onClick={() => {
-                  useStore.setState({ selectedId: row.id })
+                  setUiState({ selectedId: row.id })
                   onFocus(row.id)
                 }}
               >

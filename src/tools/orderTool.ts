@@ -1,7 +1,7 @@
 import type { Rect } from '@/data/nodes'
 import { drawSelectionHud } from '@/engine/layers/hud'
 import type { Viewport } from '@/engine/viewport'
-import { commit, useStore } from '@/store/store'
+import { commit, setUiState, useStore } from '@/store/store'
 import type { Tool, ToolEvent } from './types'
 
 export type Arrow = { x1: number; y1: number; x2: number; y2: number; headAngle: number }
@@ -77,7 +77,7 @@ export class OrderTool implements Tool {
       if (id === null) return
       this.dragFrom = id
       this.cursor = [e.world[0], e.world[1]]
-      useStore.setState({ selectedId: id })
+      setUiState({ selectedId: id })
       this.deps.requestDraw()
     })
   }

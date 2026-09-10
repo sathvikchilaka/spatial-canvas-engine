@@ -98,7 +98,8 @@ describe('shield predicate', () => {
     expect(r.applied).toBe(1)
   })
 
-  it('still shields a node whose geometry a human edited', () => {
+  it('still shields a node whose geometry a human edited, and does not touch history', () => {
+    resetHistory()
     useStore.setState(
       {
         edits: { 1: { rect: { x: 1, y: 2, w: 3, h: 4 } } },
@@ -110,7 +111,12 @@ describe('shield predicate', () => {
       },
       true,
     )
+    const canUndoBefore = canUndo()
     const r = applyPageUpdate(0, Uint32Array.of(1), Float32Array.of(9, 9, 9, 9))
+    // The shielded branch is a bare `continue` before any `d.edits` write today —
+    // assert that explicitly so a future edit to that branch that starts writing
+    // (and thus recording history) is caught here.
+    expect(canUndo()).toBe(canUndoBefore)
     expect(r.shielded).toBe(1)
     expect(useStore.getState().edits[1].rect).toEqual({ x: 1, y: 2, w: 3, h: 4 })
   })

@@ -159,11 +159,13 @@ export class TableTool implements Tool {
     ctx.strokeStyle = 'rgba(255, 190, 120, 0.55)'
     ctx.lineWidth = px
     ctx.beginPath()
-    for (const x of mesh.cols) {
+    for (let i = 0; i < mesh.cols.length; i++) {
+      const x = mesh.cols[i]
       ctx.moveTo(x, mesh.bounds.y)
       ctx.lineTo(x, mesh.bounds.y + mesh.bounds.h)
     }
-    for (const y of mesh.rows) {
+    for (let i = 0; i < mesh.rows.length; i++) {
+      const y = mesh.rows[i]
       ctx.moveTo(mesh.bounds.x, y)
       ctx.lineTo(mesh.bounds.x + mesh.bounds.w, y)
     }

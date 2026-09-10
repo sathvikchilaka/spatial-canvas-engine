@@ -34,8 +34,9 @@ export type CellInput = {
  * Smallest band a divider drag may leave behind, world units.
  *
  * This is a *drag constraint* only. Band derivation below is tolerance-free — it
- * uses occupancy gaps, not a misalignment threshold — so tuning this constant can
- * never silently change how a mesh is derived.
+ * uses occupancy gaps and exactly-shared rect edges, never a misalignment
+ * threshold — so tuning this constant can never silently change how a mesh is
+ * derived.
  */
 export const MIN_BAND = 8
 
@@ -101,20 +102,56 @@ function splitInterval(interval: Band, extents: Extent[]): Band[] {
 }
 
 /**
+ * Splits an interval at its interior *shared edges*: a coordinate that is
+ * simultaneously some extent's `hi` and another extent's `lo`. A gapless table
+ * — which is exactly what `cellRect` produces, and therefore what the rebuild
+ * after every commit feeds back in — has no occupancy gaps at all, so without
+ * this the whole table fuses into one band and the mesh collapses to 1x1 after
+ * the first gesture. Equality here is exact: two cells tiled from the same
+ * divider line carry byte-identical edge coordinates (the same value, through
+ * the same `Float32Array` rounding), while merely *nearby* extraction edges
+ * differ and stay in one band. So this is a structural test, not a tolerance —
+ * `MIN_BAND` remains the divider-drag clamp and nothing else.
+ */
+function splitAtSharedEdges(interval: Band, extents: Extent[]): Band[] {
+  const inside = extents.filter((e) => e.lo < interval.hi && e.hi > interval.lo)
+  if (inside.length < 2) return [interval]
+
+  const cuts: number[] = []
+  for (const a of inside) {
+    const c = a.hi
+    if (c <= interval.lo || c >= interval.hi) continue
+    if (cuts.includes(c)) continue
+    if (inside.some((b) => b.lo === c)) cuts.push(c)
+  }
+  if (cuts.length === 0) return [interval]
+
+  cuts.sort((a, b) => a - b)
+  const bands: Band[] = []
+  let lo = interval.lo
+  for (const c of cuts) {
+    bands.push({ lo, hi: c })
+    lo = c
+  }
+  bands.push({ lo, hi: interval.hi })
+  return bands
+}
+
+/**
  * Bands are occupancy intervals, recursively split wherever a covering extent
  * turns out to be bridging a real gap between other extents (see
- * `splitInterval`). A cell spanning two bands is distinguished from a
- * genuinely wide cell structurally — by whether removing it reveals an
- * interior gap — never by comparing widths.
- *
- * Documented limitation: cells sharing an *exact* edge (a table with no insets) touch,
- * so they land in one band. The synthetic generator always emits a 6px inset, so real
- * input separates cleanly.
+ * `splitInterval`), then split again at interior shared edges (see
+ * `splitAtSharedEdges`) so a gapless table separates too. A cell spanning two
+ * bands is distinguished from a genuinely wide cell structurally — by whether
+ * removing it reveals an interior gap, or by an edge two cells actually share —
+ * never by comparing widths.
  */
 function bandsOf(extents: Extent[]): Band[] {
   if (extents.length === 0) return []
   const top = occupancy(extents)
-  return top.flatMap((b) => splitInterval(b, extents))
+  return top
+    .flatMap((b) => splitInterval(b, extents))
+    .flatMap((b) => splitAtSharedEdges(b, extents))
 }
 
 /** Outer edges of the outermost bands, interior lines midway between bands. */
@@ -300,10 +337,40 @@ export function splitCell(
   const lines = axis === "row" ? mesh.rows : mesh.cols
   const from = axis === "row" ? target.row : target.col
   const span = axis === "row" ? target.rowSpan : target.colSpan
-  const lo = lines[from]
-  const hi = lines[Math.min(lines.length - 1, from + span)]
-  const at = (lo + hi) / 2
-  const insertAt = from + 1
+  const last = Math.min(lines.length - 1, from + span)
+  if (from < 0 || from >= last) return mesh
+  const at0 = (lines[from] + lines[last]) / 2
+
+  // The new line must land strictly *inside* one existing band, and the insert
+  // index must be the one that band's right edge occupies — otherwise a target
+  // spanning more than one band inserts the midpoint before lines it is
+  // greater than, and `lines` stops being increasing (a negative-width rect
+  // then reaches `nodes.coords`). Preferred band is the one the span midpoint
+  // falls in; if the midpoint lands exactly on an existing line (an even span
+  // of equal bands) the widest band in the span is used instead, whose own
+  // midpoint is always a strict interior.
+  let band = -1
+  for (let i = from; i < last; i++) {
+    if (at0 > lines[i] && at0 < lines[i + 1]) {
+      band = i
+      break
+    }
+  }
+  let at = at0
+  if (band < 0) {
+    let widest = from
+    let best = -Infinity
+    for (let i = from; i < last; i++) {
+      const w = lines[i + 1] - lines[i]
+      if (w > best) {
+        best = w
+        widest = i
+      }
+    }
+    band = widest
+    at = (lines[band] + lines[band + 1]) / 2
+  }
+  const insertAt = band + 1
 
   const nextLines = [...lines.slice(0, insertAt), at, ...lines.slice(insertAt)]
 
@@ -314,20 +381,25 @@ export function splitCell(
     const shiftedFrom = cFrom >= insertAt ? cFrom + 1 : cFrom
     // Straddles the new line: widen the span so the rect is unchanged.
     const straddles = cFrom < insertAt && cFrom + cSpan >= insertAt
-    const shiftedSpan = c.id === cellId ? 1 : straddles ? cSpan + 1 : cSpan
+    // The target keeps only the part of its span left of the new line.
+    const shiftedSpan =
+      c.id === cellId ? insertAt - from : straddles ? cSpan + 1 : cSpan
     cells.push(
       axis === "row"
         ? { ...c, row: shiftedFrom, rowSpan: shiftedSpan }
         : { ...c, col: shiftedFrom, colSpan: shiftedSpan }
     )
   }
+  // ... and the new cell takes the rest of it, which is more than one band
+  // when the target was a merged cell.
+  const restSpan = from + span + 1 - insertAt
   cells.push(
     axis === "row"
       ? {
           id: newId,
           row: insertAt,
           col: target.col,
-          rowSpan: 1,
+          rowSpan: restSpan,
           colSpan: target.colSpan,
         }
       : {
@@ -335,7 +407,7 @@ export function splitCell(
           row: target.row,
           col: insertAt,
           rowSpan: target.rowSpan,
-          colSpan: 1,
+          colSpan: restSpan,
         }
   )
 

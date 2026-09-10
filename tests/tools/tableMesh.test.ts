@@ -467,3 +467,95 @@ describe("mergeCells", () => {
     expect(mergeCells(m0, 1, 999)).toBe(m0)
   })
 })
+
+describe("derivation is closed over its own output", () => {
+  /** The rects `cellRect` hands the commit path, as `buildMesh` input. */
+  function rederive(m: Mesh): CellInput[] {
+    return m.cells.map((c) => {
+      const r = cellRect(m, c)
+      return { id: c.id, x: r.x, y: r.y, w: r.w, h: r.h }
+    })
+  }
+
+  it("rebuilds the same bands from gapless rects it produced itself", () => {
+    // The post-commit rebuild in `Session.subscribeSelection` feeds exactly
+    // this back in: `cellRect` tiles the table, so adjacent cells share an
+    // exact edge and occupancy alone would fuse the whole table into one band.
+    const m0 = buildMesh(insetGrid(3, 2))
+    const m1 = buildMesh(rederive(m0))
+    expectMonotonic(m1)
+    expect(m1.cols).toHaveLength(m0.cols.length)
+    expect(m1.rows).toHaveLength(m0.rows.length)
+    expect(m1.cols).toEqual(m0.cols)
+    expect(m1.rows).toEqual(m0.rows)
+    for (const c of m0.cells) {
+      const n = m1.cells.find((x) => x.id === c.id)!
+      expect([n.row, n.col, n.rowSpan, n.colSpan]).toEqual([
+        c.row,
+        c.col,
+        c.rowSpan,
+        c.colSpan,
+      ])
+    }
+  })
+
+  it("is a fixed point after a divider drag, so a second gesture still has a grid", () => {
+    const dragged = moveDivider(buildMesh(insetGrid(2, 2)), "col", 1, 170)
+    const rebuilt = buildMesh(rederive(dragged))
+    expectMonotonic(rebuilt)
+    expect(rebuilt.cols).toEqual(dragged.cols)
+    expect(rebuilt.rows).toEqual(dragged.rows)
+    // And stable under a further round trip.
+    const again = buildMesh(rederive(rebuilt))
+    expect(again.cols).toEqual(rebuilt.cols)
+    expect(again.rows).toEqual(rebuilt.rows)
+  })
+
+  it("keeps a spanning cell spanning across a rebuild", () => {
+    const merged = mergeCells(buildMesh(insetGrid(2, 2)), 1, 2)
+    const rebuilt = buildMesh(rederive(merged))
+    expectMonotonic(rebuilt)
+    expect(rebuilt.cols).toHaveLength(3)
+    expect(rebuilt.cells.find((c) => c.id === 1)!.colSpan).toBe(2)
+  })
+})
+
+describe("splitCell on a spanning cell", () => {
+  it("keeps the lines monotonic and every rect positive", () => {
+    const merged = mergeCells(buildMesh(insetGrid(2, 3)), 1, 2)
+    const m = splitCell(merged, 1, "col", 5000)
+    expectMonotonic(m)
+    for (const c of m.cells) {
+      const r = cellRect(m, c)
+      expect(r.w).toBeGreaterThan(0)
+      expect(r.h).toBeGreaterThan(0)
+    }
+  })
+
+  it("splits the merged cell's own rect in two adjoining halves", () => {
+    const merged = mergeCells(buildMesh(insetGrid(2, 3)), 1, 2)
+    const old = cellRect(
+      merged,
+      merged.cells.find((c) => c.id === 1)!
+    )
+    const m = splitCell(merged, 1, "col", 5000)
+    const a = cellRect(
+      m,
+      m.cells.find((c) => c.id === 1)!
+    )
+    const b = cellRect(
+      m,
+      m.cells.find((c) => c.id === 5000)!
+    )
+    expect(a.x).toBe(old.x)
+    expect(a.x + a.w).toBeCloseTo(b.x, 6)
+    expect(b.x + b.w).toBeCloseTo(old.x + old.w, 6)
+  })
+
+  it("splits a row-spanning cell without corrupting the rows", () => {
+    const merged = mergeCells(buildMesh(insetGrid(3, 2)), 1, 3)
+    const m = splitCell(merged, 1, "row", 5000)
+    expectMonotonic(m)
+    for (const c of m.cells) expect(cellRect(m, c).h).toBeGreaterThan(0)
+  })
+})

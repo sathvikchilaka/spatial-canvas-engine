@@ -421,7 +421,12 @@ export class Session {
     this.nodes.coords[c + 1] = to.y
     this.nodes.coords[c + 2] = to.w
     this.nodes.coords[c + 3] = to.h
+    this.grid.move(i, this.pageOf(i), { x: fx, y: fy, w: fw, h: fh }, to)
     this.syncIndex(id, { x: fx, y: fy, w: fw, h: fh }, to)
+  }
+
+  private pageOf(i: number): number {
+    return this.nodes.pages[i]
   }
 
   /**

@@ -55,3 +55,35 @@ describe('BucketGrid', () => {
     expect(new Set(Array.from(out.slice(0, n))).size).toBe(n)
   })
 })
+
+describe('BucketGrid.move', () => {
+  /**
+   * Culling is per frame and main-thread, so a box dragged out of its original
+   * 512px cell is simply not returned any more — it vanishes from the canvas
+   * while still being selectable. The grid has to move with the edit.
+   */
+  it('finds a box at its new home and not at its old one', () => {
+    const g = new BucketGrid(512)
+    const ids = Uint32Array.of(7)
+    const coords = Float32Array.of(10, 10, 20, 20)
+    g.addPage(0, ids, coords, Uint32Array.of(0))
+
+    const out = new Uint32Array(16)
+    expect(g.query(0, 0, 100, 100, out)).toBe(1)
+
+    g.move(0, 0, { x: 10, y: 10, w: 20, h: 20 }, { x: 5000, y: 5000, w: 20, h: 20 })
+
+    expect(g.query(0, 0, 100, 100, out)).toBe(0)
+    expect(g.query(4900, 4900, 200, 200, out)).toBe(1)
+    expect(out[0]).toBe(0)
+  })
+
+  it('still drops a moved box when its page is cleared', () => {
+    const g = new BucketGrid(512)
+    g.addPage(3, Uint32Array.of(7), Float32Array.of(10, 10, 20, 20), Uint32Array.of(0))
+    g.move(0, 3, { x: 10, y: 10, w: 20, h: 20 }, { x: 5000, y: 5000, w: 20, h: 20 })
+    g.clearPage(3)
+    const out = new Uint32Array(16)
+    expect(g.query(4900, 4900, 200, 200, out)).toBe(0)
+  })
+})

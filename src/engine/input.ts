@@ -55,9 +55,11 @@ export function attachInput(
   let lastY = 0
   let pointerId = -1
 
-  /** Live pointers, for the two-finger pinch. Screen (CSS) px, canvas-relative. */
-  const active = new Map<number, { x: number; y: number }>()
+  /** Live pointers, for the two-finger pinch. Client (viewport) px. */
+  const active = new Map<number, { clientX: number; clientY: number }>()
   let pinch: PinchState | null = null
+  /** The pointer ids the current `pinch` baseline was seeded from. */
+  let pinchIds: [number, number] | null = null
 
   const toWorld = (e: PointerEvent): WorldPointer => {
     const r = canvas.getBoundingClientRect()
@@ -83,12 +85,12 @@ export function attachInput(
   }
 
   const onDown = (e: PointerEvent) => {
-    const r0 = canvas.getBoundingClientRect()
-    active.set(e.pointerId, { x: e.clientX - r0.left, y: e.clientY - r0.top })
-    if (active.size === 2) {
-      const [p1, p2] = [...active.values()]
-      pinch = { dist: Math.hypot(p2.x - p1.x, p2.y - p1.y), cx: (p1.x + p2.x) / 2, cy: (p1.y + p2.y) / 2 }
-      // A pinch supersedes whatever one finger had started.
+    active.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY })
+    if (active.size >= 2) {
+      // A second (or further) finger supersedes any single-pointer gesture in
+      // progress. The pinch baseline itself is (re)seeded in `onMove`, so a
+      // pair swap mid-gesture goes through the same seeding path (finding 2)
+      // instead of being duplicated here.
       panning = false
       return
     }
@@ -109,18 +111,32 @@ export function attachInput(
 
   const onMove = (e: PointerEvent) => {
     if (active.has(e.pointerId)) {
-      const r = canvas.getBoundingClientRect()
-      active.set(e.pointerId, { x: e.clientX - r.left, y: e.clientY - r.top })
+      active.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY })
     }
-    if (pinch && active.size >= 2) {
-      const [p1, p2] = [...active.values()]
-      const next = pinchUpdate(pinch, p1, p2)
-      // Zoom about the midpoint, then pan by the midpoint's own drift, so a
-      // two-finger drag pans and a two-finger spread zooms — both at once.
-      let vp = zoomAt(engine.viewport, next.cx, next.cy, next.factor)
-      vp = panBy(vp, next.cx - pinch.cx, next.cy - pinch.cy)
-      engine.setViewport(vp)
-      pinch = next
+    if (active.size >= 2) {
+      const r = canvas.getBoundingClientRect()
+      const entries = [...active.entries()]
+      const [id1, c1] = entries[0]
+      const [id2, c2] = entries[1]
+      const p1 = { x: c1.clientX - r.left, y: c1.clientY - r.top }
+      const p2 = { x: c2.clientX - r.left, y: c2.clientY - r.top }
+      const samePair = pinch !== null && pinchIds !== null && pinchIds[0] === id1 && pinchIds[1] === id2
+      if (!samePair) {
+        // A fresh pinch, or the pinched pair's identity changed (a third
+        // finger joined and one of the original two lifted) — reseed the
+        // baseline instead of comparing against a stale pair (finding 2).
+        const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y)
+        pinch = { dist, cx: (p1.x + p2.x) / 2, cy: (p1.y + p2.y) / 2 }
+        pinchIds = [id1, id2]
+      } else if (pinch) {
+        const next = pinchUpdate(pinch, p1, p2)
+        // Zoom about the midpoint, then pan by the midpoint's own drift, so a
+        // two-finger drag pans and a two-finger spread zooms — both at once.
+        let vp = zoomAt(engine.viewport, next.cx, next.cy, next.factor)
+        vp = panBy(vp, next.cx - pinch.cx, next.cy - pinch.cy)
+        engine.setViewport(vp)
+        pinch = next
+      }
       return
     }
     if (panning) {
@@ -133,12 +149,34 @@ export function attachInput(
   }
 
   const onUp = (e: PointerEvent) => {
+    const wasPinching = pinch !== null
     active.delete(e.pointerId)
-    if (active.size < 2) pinch = null
+
     if (pointerId === e.pointerId && canvas.hasPointerCapture(e.pointerId)) {
       canvas.releasePointerCapture(e.pointerId)
     }
     pointerId = -1
+
+    if (wasPinching) {
+      if (active.size < 2) {
+        pinch = null
+        pinchIds = null
+        if (active.size === 1) {
+          // One finger survives the pinch: hand off to a pan using it, so the
+          // canvas doesn't go dead until a full release+press cycle
+          // (finding 1) — `onMove` will keep it moving from here.
+          const [survivor] = active.values()
+          panning = true
+          lastX = survivor.clientX
+          lastY = survivor.clientY
+        } else {
+          panning = false
+        }
+      }
+      // A lifted pinch finger never drove the active tool; nothing else to do.
+      return
+    }
+
     if (panning) {
       panning = false
       return

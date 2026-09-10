@@ -163,11 +163,24 @@ populates the degenerate case, out-degree 1 everywhere. `materialize(base, added
 recomputes the effective graph (base ∪ human-added ∖ human-removed) and its adjacency map on
 edit, and is what the reading-order overlay draws from.
 
-`hasEdge(set, from, to)` is an **allocation-free linear scan** over the pair array — over the full
-corpus that's a scan of ~5,294 pairs per call. This is safe *only* because nothing in the render
-path calls `hasEdge` per frame or per box; the overlay draws from the materialized `adjacency`
-map, and `hasEdge` is reserved for one-off membership checks (e.g. edit validation), not the draw
-loop.
+Editing the graph has two gestures. Pressing on empty box space and dragging onto another box
+**links or unlinks** that pair (`hasEdge` decides which). Pressing on a *painted arrow's
+endpoint* instead **re-parents** it: dragging the head re-points the successor, dragging the tail
+re-points the predecessor, and either way the old edge's removal and the new edge's addition go
+into a **single `commit()`** — a re-parent is one reviewer intent, and two commits would let
+Cmd+Z leave the graph disconnected.
+
+Endpoint hit-testing (`hitEndpoint`) consults only the arrows the overlay painted last frame.
+The graph has 5,294 edges on FUNSD, but the reviewer can only grab one that is on screen, so the
+overlay records each arrow it draws into a pre-allocated `ArrowRecord[]` (capped at the arrow
+budget, overwritten in place, zero per-frame allocation) and the tool searches that.
+
+Badges show the node's **reading position**, not its out-degree. `sequenceNumbers` walks the
+graph from its in-degree-0 roots depth-first — roots ordered by document order then id, children
+by id, so the numbering is deterministic frame to frame — and anything left unreached (a cycle a
+reviewer or an extractor created) is numbered afterwards, so no linked node renders blank. The
+result is a `Map<nodeId, number>` stored on the `EdgeSet` and rebuilt only when the graph
+changes; the badge painter does a map lookup, never a walk.
 
 ## 5b. Table grid mesh
 
@@ -281,6 +294,9 @@ design gap.
 - The shipped stream is an SSE-shaped replay, not a live `EventSource` (§2). The client and the
   dev server exist and the interface is the one a real endpoint would satisfy, but wiring the
   endpoint probe into `createStream()` is unfinished work, not a design position.
+- Sequence numbers are a DFS pre-order over a graph that is not required to be a tree. For a
+  FUNSD question with three answers the numbering is one valid reading, not the only one; the
+  brief asks the flow to be visible and editable, not to be linearised canonically.
 - `hasEdge`'s linear scan (§5) would need to become a `Set`/index if any future feature calls it
   from a hot path instead of one-off checks.
 - FUNSD raster decode and heap-return-to-baseline are unverified (§6) — first thing to check with

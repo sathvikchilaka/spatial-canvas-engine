@@ -1,11 +1,11 @@
-import { createNodeArrays, FLAG_DIRTY, FLAG_SELECTED, indexOfId, NodeType, pushNode, type NodeArrays, type Rect } from '@/data/nodes'
+import { createNodeArrays, FLAG_DIRTY, FLAG_HIDDEN, FLAG_SELECTED, indexOfId, NodeType, pushNode, type NodeArrays, type Rect } from '@/data/nodes'
 import type { DocumentSource } from '@/data/document'
 import type { PageGeometry } from '@/data/geometry'
 import { BucketGrid } from '@/engine/bucketGrid'
 import { CanvasEngine } from '@/engine/engine'
 import { attachInput } from '@/engine/input'
 import { screenToWorld } from '@/engine/viewport'
-import { redo, undo, useStore } from '@/store/store'
+import { redo, undo, useStore, type Edit } from '@/store/store'
 import { toolHandlers } from '@/tools/adapter'
 import { OrderTool } from '@/tools/orderTool'
 import { SelectTool } from '@/tools/selectTool'
@@ -59,6 +59,12 @@ export class Session {
   private baseCoords = new Float32Array(1024 * 4)
   /** Node ids whose `nodes.coords` currently hold an edit, not the stream value. */
   private readonly overridden = new Set<number>()
+  /** Ids the reviewer created. Far above any streamed id (`page * 1000 + n`). */
+  private nextLocalId = 1_000_000_000
+  /** Created nodes already pushed into `nodes` — pushes are irreversible, so this is the mirror. */
+  private readonly created = new Set<number>()
+  /** Nodes currently hidden by a `deleted` edit, so undo can unhide exactly those. */
+  private readonly hidden = new Set<number>()
   private stream: StreamSource | null = null
   /** Set by `dispose()`. Guards every continuation that resumes after an await. */
   private disposed = false
@@ -112,6 +118,12 @@ export class Session {
       tableAt: (id) => this.tableAt(id),
       pick: (x, y) => this.worker.hitTest(x, y),
       requestDraw: () => this.engine.requestDraw(),
+      allocId: () => this.allocId(),
+      nodeMeta: (id) => {
+        const i = indexOfId(this.nodes, id)
+        if (i < 0) return null
+        return { page: this.nodes.pages[i], parent: this.nodes.parents[i], order: this.nodes.order[i] }
+      },
     })
     this.tool = this.selectTool
 
@@ -135,6 +147,15 @@ export class Session {
     this.detachers.push(bindShortcuts())
 
     this.engine.start()
+  }
+
+  /**
+   * Ids for reviewer-created nodes. Streamed ids are `page * ID_STRIDE + n`, so
+   * this base is unreachable from ingest and a created cell can never collide
+   * with a node that arrives later on the stream.
+   */
+  allocId(): number {
+    return this.nextLocalId++
   }
 
   /**
@@ -255,6 +276,9 @@ export class Session {
     const cells: TableSnapshot['cells'] = []
     for (let j = 0; j < this.nodes.count; j++) {
       if (this.nodes.parents[j] !== tableId || this.nodes.types[j] !== NodeType.Cell) continue
+      // A merged-away cell still owns its row (indices are stable); rebuilding
+      // the mesh from it would resurrect the cell the reviewer just merged.
+      if (this.nodes.flags[j] & FLAG_HIDDEN) continue
       const c = j * 4
       cells.push({
         id: this.nodes.ids[j],
@@ -404,6 +428,9 @@ export class Session {
       const i = state.selectedId === null ? -1 : indexOfId(this.nodes, state.selectedId)
       if (i >= 0) this.nodes.flags[i] |= FLAG_SELECTED
       prevSelected = i
+      // Structural edits first: a created node must exist in `nodes` before
+      // `applyEdits` can position it, or be flagged dirty.
+      this.materializeStructural(state.edits)
       for (const key of Object.keys(state.dirtyAt)) {
         const di = indexOfId(this.nodes, Number(key))
         if (di >= 0) this.nodes.flags[di] |= FLAG_DIRTY
@@ -422,13 +449,131 @@ export class Session {
   }
 
   /**
+   * Applies the two structural edit kinds. Node rows only ever grow — indices
+   * are referenced by the cull grid, the worker's `indexById` and the tree — so
+   * "undo a creation" means hide it and drop it from the hit-test index, not
+   * splice it out. That keeps every index stable across arbitrarily deep
+   * undo/redo, which is the property the memory-footprint and
+   * no-corrupted-state criteria actually rest on.
+   */
+  private materializeStructural(edits: Record<number, Edit>): void {
+    for (const key of Object.keys(edits)) {
+      const id = Number(key)
+      const e = edits[id]
+      if (!e?.created) continue
+      let i = indexOfId(this.nodes, id)
+      if (i < 0) {
+        const r = e.rect ?? { x: 0, y: 0, w: 0, h: 0 }
+        i = pushNode(this.nodes, {
+          id,
+          page: e.created.page,
+          x: r.x,
+          y: r.y,
+          w: r.w,
+          h: r.h,
+          type: e.created.type,
+          parent: e.created.parent,
+          order: e.created.order,
+        })
+        const c = i * 4
+        this.rememberBase(Uint32Array.of(i), this.nodes.coords.slice(c, c + 4))
+        this.grid.insert(i, e.created.page, r.x, r.y, r.w, r.h)
+        this.insertIndex(id, i)
+      } else if (this.created.has(id) && this.nodes.flags[i] & FLAG_HIDDEN) {
+        // Redo of a creation: unhide and re-index the row we kept.
+        this.showNode(id, i)
+      }
+      this.created.add(id)
+    }
+
+    // A created node whose edit is gone (undo) is hidden and de-indexed.
+    for (const id of this.created) {
+      if (edits[id]?.created) continue
+      const i = indexOfId(this.nodes, id)
+      if (i < 0) continue
+      if (this.nodes.flags[i] & FLAG_HIDDEN) continue
+      this.hideNode(id, i)
+    }
+
+    for (const key of Object.keys(edits)) {
+      const id = Number(key)
+      if (!edits[id]?.deleted || this.hidden.has(id)) continue
+      const i = indexOfId(this.nodes, id)
+      if (i < 0) continue
+      this.hideNode(id, i)
+      this.hidden.add(id)
+    }
+    for (const id of this.hidden) {
+      if (edits[id]?.deleted) continue
+      this.hidden.delete(id)
+      const i = indexOfId(this.nodes, id)
+      if (i < 0) continue
+      this.showNode(id, i)
+    }
+  }
+
+  /** Hides a node and drops it from both spatial indexes, so it stops being hittable. */
+  private hideNode(id: number, i: number): void {
+    const c = i * 4
+    const r = {
+      x: this.nodes.coords[c],
+      y: this.nodes.coords[c + 1],
+      w: this.nodes.coords[c + 2],
+      h: this.nodes.coords[c + 3],
+    }
+    this.nodes.flags[i] |= FLAG_HIDDEN
+    this.grid.remove(i, r.x, r.y, r.w, r.h)
+    void this.worker.removeNode(id, r).catch((err) => {
+      if (!this.disposed) throw err
+    })
+  }
+
+  /** The exact inverse of `hideNode`: back into the draw loop and both indexes. */
+  private showNode(id: number, i: number): void {
+    const c = i * 4
+    this.nodes.flags[i] &= ~FLAG_HIDDEN
+    this.grid.insert(
+      i,
+      this.nodes.pages[i],
+      this.nodes.coords[c],
+      this.nodes.coords[c + 1],
+      this.nodes.coords[c + 2],
+      this.nodes.coords[c + 3],
+    )
+    this.insertIndex(id, i)
+  }
+
+  /**
+   * Fire-and-forget, same contract as `syncIndex`: nothing waits on the
+   * QuadTree insert, but a rejection after dispose is teardown, not a failure.
+   */
+  private insertIndex(id: number, i: number): void {
+    const c = i * 4
+    void this.worker
+      .insertNode({
+        id,
+        page: this.nodes.pages[i],
+        x: this.nodes.coords[c],
+        y: this.nodes.coords[c + 1],
+        w: this.nodes.coords[c + 2],
+        h: this.nodes.coords[c + 3],
+        type: this.nodes.types[i],
+        parent: this.nodes.parents[i],
+        order: this.nodes.order[i],
+      })
+      .catch((err) => {
+        if (!this.disposed) throw err
+      })
+  }
+
+  /**
    * Committed edits win over the extracted geometry in the render arrays — and,
    * just as importantly, an edit that *disappears* (undo, or a redo rewound
    * past it) puts the stream geometry back. Both loops are O(human edits), and
    * both write through `writeCoords`, which is what keeps the worker's index
    * and the cull grid in step with whatever the history says is true.
    */
-  private applyEdits(edits: Record<number, { rect?: Rect }>) {
+  private applyEdits(edits: Record<number, Edit>) {
     for (const key of Object.keys(edits)) {
       const id = Number(key)
       const rect = edits[id]?.rect
@@ -474,6 +619,10 @@ export class Session {
     this.nodes.coords[c + 1] = to.y
     this.nodes.coords[c + 2] = to.w
     this.nodes.coords[c + 3] = to.h
+    // A hidden node is out of both indexes on purpose; a `move`/`update` here
+    // would re-insert it and make a merged-away cell hittable again. `showNode`
+    // re-indexes it from these coords if it ever comes back.
+    if (this.nodes.flags[i] & FLAG_HIDDEN) return
     this.grid.move(i, this.pageOf(i), { x: fx, y: fy, w: fw, h: fh }, to)
     this.syncIndex(id, { x: fx, y: fy, w: fw, h: fh }, to)
   }
@@ -504,6 +653,8 @@ export class Session {
     for (const off of this.detachers) off()
     this.detachers.length = 0
     this.overridden.clear()
+    this.created.clear()
+    this.hidden.clear()
     this.engine.dispose()
     this.worker.dispose()
     this.grid.clear()

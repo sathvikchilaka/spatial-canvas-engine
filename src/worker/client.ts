@@ -1,5 +1,12 @@
 import type { Rect } from '@/data/nodes'
-import { UNSOLICITED, type PageIngested, type Req, type Res, type SerializedPage } from './protocol'
+import {
+  UNSOLICITED,
+  type PageIngested,
+  type Req,
+  type Res,
+  type SerializedNode,
+  type SerializedPage,
+} from './protocol'
 
 type Pending = { resolve: (v: never) => void; reject: (e: Error) => void }
 
@@ -42,6 +49,16 @@ export class WorkerClient {
 
   updateNode(nodeId: number, old: Rect, next: Rect): Promise<void> {
     return this.request({ kind: 'updateNode', nodeId, old, next }) as Promise<void>
+  }
+
+  /** Adds a reviewer-created node to the index (a split table cell). */
+  insertNode(node: SerializedNode): Promise<void> {
+    return this.request({ kind: 'insertNode', node }) as Promise<void>
+  }
+
+  /** Drops a node from the index so it stops answering hit tests. */
+  removeNode(nodeId: number, rect: Rect): Promise<void> {
+    return this.request({ kind: 'removeNode', nodeId, rect }) as Promise<void>
   }
 
   reset(): Promise<void> {

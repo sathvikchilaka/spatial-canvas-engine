@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { buildMesh, moveDivider } from '@/tools/tableMesh'
 import { TableTool, meshEdits, type TableSnapshot } from '@/tools/tableTool'
-import { resetHistory, undo, useStore } from '@/store/store'
+import { canUndo, resetHistory, undo, useStore } from '@/store/store'
 import type { Rect } from '@/data/nodes'
 
 const cells = () => {
@@ -75,6 +75,8 @@ describe('TableTool', () => {
       tableAt: () => snapshot(),
       pick: async () => 3,
       requestDraw: () => {},
+      allocId: () => 5000,
+      nodeMeta: () => ({ page: 0, parent: 900, order: 0 }),
     })
     await tool.adopt(3)
     expect(tool.tableId).toBe(900)
@@ -82,7 +84,7 @@ describe('TableTool', () => {
   })
 
   it('reports no mesh when the pick is not in a table', async () => {
-    const tool = new TableTool({ tableAt: () => null, pick: async () => 7, requestDraw: () => {} })
+    const tool = new TableTool({ tableAt: () => null, pick: async () => 7, requestDraw: () => {}, allocId: () => 5000, nodeMeta: () => ({ page: 0, parent: 900, order: 0 }) })
     await tool.adopt(7)
     expect(tool.mesh).toBeNull()
     expect(tool.tableId).toBeNull()
@@ -93,6 +95,8 @@ describe('TableTool', () => {
       tableAt: () => snapshot(),
       pick: async () => 1,
       requestDraw: () => {},
+      allocId: () => 5000,
+      nodeMeta: () => ({ page: 0, parent: 900, order: 0 }),
     })
     await tool.adopt(1)
 
@@ -117,6 +121,8 @@ describe('TableTool', () => {
       tableAt: () => snapshot(),
       pick: async () => 1,
       requestDraw: () => {},
+      allocId: () => 5000,
+      nodeMeta: () => ({ page: 0, parent: 900, order: 0 }),
     })
     await tool.adopt(1)
     // (120, 210) sits within 8px slop of row line y=206, which would wrongly
@@ -134,6 +140,8 @@ describe('TableTool', () => {
       tableAt: () => snapshot(),
       pick: async () => 1,
       requestDraw: () => {},
+      allocId: () => 5000,
+      nodeMeta: () => ({ page: 0, parent: 900, order: 0 }),
     })
     await tool.adopt(1)
     // Within 8px slop of row line y=206: a drag does start here (unlike the
@@ -146,7 +154,7 @@ describe('TableTool', () => {
   })
 
   it('draws mesh lines only when a table is adopted', async () => {
-    const tool = new TableTool({ tableAt: () => null, pick: async () => 1, requestDraw: () => {} })
+    const tool = new TableTool({ tableAt: () => null, pick: async () => 1, requestDraw: () => {}, allocId: () => 5000, nodeMeta: () => ({ page: 0, parent: 900, order: 0 }) })
     const a = ctx()
     tool.drawHud(a.proxy, { scale: 1, tx: 0, ty: 0 })
     expect(a.calls.filter((c) => c.startsWith('moveTo'))).toHaveLength(0)
@@ -155,11 +163,127 @@ describe('TableTool', () => {
       tableAt: () => snapshot(),
       pick: async () => 1,
       requestDraw: () => {},
+      allocId: () => 5000,
+      nodeMeta: () => ({ page: 0, parent: 900, order: 0 }),
     })
     await tool2.adopt(1)
     const b = ctx()
     tool2.drawHud(b.proxy, { scale: 1, tx: 0, ty: 0 })
     // 3 column lines + 3 row lines
     expect(b.calls.filter((c) => c.startsWith('moveTo'))).toHaveLength(6)
+  })
+})
+
+/** No jsdom in this suite: onKeyDown only reads `key` and the modifier flags. */
+const key = (k: string, mods: Partial<KeyboardEvent> = {}) =>
+  ({ key: k, metaKey: false, ctrlKey: false, altKey: false, ...mods }) as KeyboardEvent
+
+/** Lets the `pick` promise chain in `onPointerDown` settle. */
+const settle = async () => {
+  for (let i = 0; i < 5; i++) await Promise.resolve()
+}
+
+describe('TableTool split and merge', () => {
+  const mkTool = (pick: number) =>
+    new TableTool({
+      tableAt: () => snapshot(),
+      pick: async () => pick,
+      requestDraw: () => {},
+      allocId: () => 5000,
+      nodeMeta: () => ({ page: 0, parent: 900, order: 0 }),
+    })
+
+  it('S splits the selected cell in one undoable commit, moving no other cell', async () => {
+    const tool = mkTool(1)
+    useStore.setState({ selectedId: 1 })
+    await tool.adopt(1)
+    // Cell 1 is 44x14, so the split is along the column axis at x = 128.
+    tool.onKeyDown(key('s'))
+
+    const edits = useStore.getState().edits
+    // Cells 2, 3 and 4 keep their rects, so only the target and the new cell
+    // are committed: cell 1 keeps the low half, 5000 takes the high half.
+    expect(Object.keys(edits)).toEqual(['1', '5000'])
+    expect(edits[1].rect).toEqual({ x: 106, y: 206, w: 22, h: 14 })
+    expect(edits[5000].created).toEqual({ page: 0, type: 2, parent: 900, order: 0 })
+    expect(edits[5000].rect).toEqual({ x: 128, y: 206, w: 22, h: 14 })
+    expect(tool.mesh!.cols).toHaveLength(4)
+
+    expect(canUndo()).toBe(true)
+    undo()
+    expect(Object.keys(useStore.getState().edits)).toHaveLength(0)
+    expect(canUndo()).toBe(false)
+  })
+
+  it('S is a no-op without a mesh, a selection, or a cell under the selection', async () => {
+    const bare = new TableTool({
+      tableAt: () => null,
+      pick: async () => 1,
+      requestDraw: () => {},
+      allocId: () => 5000,
+      nodeMeta: () => ({ page: 0, parent: 900, order: 0 }),
+    })
+    useStore.setState({ selectedId: 1 })
+    bare.onKeyDown(key('s'))
+    expect(Object.keys(useStore.getState().edits)).toHaveLength(0)
+
+    const tool = mkTool(1)
+    await tool.adopt(1)
+    useStore.setState({ selectedId: null })
+    tool.onKeyDown(key('s'))
+    // A node that is not one of this table's cells.
+    useStore.setState({ selectedId: 77 })
+    tool.onKeyDown(key('s'))
+    expect(Object.keys(useStore.getState().edits)).toHaveLength(0)
+  })
+
+  it('Cmd+S is left to the browser', async () => {
+    const tool = mkTool(1)
+    useStore.setState({ selectedId: 1 })
+    await tool.adopt(1)
+    tool.onKeyDown(key('s', { metaKey: true }))
+    expect(Object.keys(useStore.getState().edits)).toHaveLength(0)
+  })
+
+  it('M merges the selection with the previously selected cell in one commit', async () => {
+    const tool = mkTool(2)
+    useStore.setState({ selectedId: 1 })
+    await tool.adopt(1)
+    // Clicking cell 2 in open cell space makes cell 1 the merge partner. At
+    // scale 4 the divider slop is 2 world units, so (180, 213) is nowhere near
+    // a line and the click really goes to `pick`.
+    tool.onPointerDown({ world: [180, 213], screen: [0, 0], scale: 4, shift: false, alt: false })
+    await settle()
+    expect(useStore.getState().selectedId).toBe(2)
+
+    tool.onKeyDown(key('m'))
+    const edits = useStore.getState().edits
+    expect(edits[2].rect).toEqual({ x: 106, y: 206, w: 88, h: 14 })
+    expect(edits[1].deleted).toBe(true)
+    expect(tool.mesh!.cells).toHaveLength(3)
+
+    // One keystroke, one undo entry — both halves of the merge come back.
+    undo()
+    expect(Object.keys(useStore.getState().edits)).toHaveLength(0)
+    expect(canUndo()).toBe(false)
+  })
+
+  it('M without a remembered partner does nothing', async () => {
+    const tool = mkTool(1)
+    useStore.setState({ selectedId: 1 })
+    await tool.adopt(1)
+    tool.onKeyDown(key('m'))
+    expect(Object.keys(useStore.getState().edits)).toHaveLength(0)
+  })
+
+  it('M refuses a non-adjacent partner', async () => {
+    const tool = mkTool(4)
+    useStore.setState({ selectedId: 1 })
+    await tool.adopt(1)
+    tool.onPointerDown({ world: [180, 229], screen: [0, 0], scale: 4, shift: false, alt: false })
+    await settle()
+    expect(useStore.getState().selectedId).toBe(4)
+    tool.onKeyDown(key('m'))
+    expect(Object.keys(useStore.getState().edits)).toHaveLength(0)
   })
 })

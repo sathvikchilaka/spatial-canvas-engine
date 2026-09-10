@@ -1,11 +1,14 @@
 import type { Rect } from '@/data/nodes'
 import type { Viewport } from '@/engine/viewport'
+import { NodeType } from '@/data/nodes'
 import { commit, useStore } from '@/store/store'
 import {
   buildMesh,
   cellRect,
   hitDivider,
+  mergeCells,
   moveDivider,
+  splitCell,
   type CellInput,
   type Mesh,
 } from './tableMesh'
@@ -18,6 +21,10 @@ export type TableToolDeps = {
   tableAt(nodeId: number): TableSnapshot | null
   pick(wx: number, wy: number): Promise<number | null>
   requestDraw(): void
+  /** A fresh node id that can never collide with a streamed one. */
+  allocId(): number
+  /** The page/parent/order a split cell must inherit from its sibling. */
+  nodeMeta(id: number): { page: number; parent: number; order: number } | null
 }
 
 /** Cells whose derived rect differs from the geometry the mesh was built from. */
@@ -52,6 +59,8 @@ export class TableTool implements Tool {
   /** Geometry the current mesh was derived from — the diff baseline. */
   private original = new Map<number, Rect>()
   private drag: { axis: 'row' | 'col'; index: number } | null = null
+  /** The previously selected cell — what `M` merges the selection with. */
+  private mergePartner: number | null = null
   private hover: { axis: 'row' | 'col'; index: number } | null = null
 
   constructor(deps: TableToolDeps) {
@@ -102,6 +111,9 @@ export class TableTool implements Tool {
     // Not on a divider: treat it as "adopt whatever table is under here".
     void this.deps.pick(e.world[0], e.world[1]).then((id) => {
       if (id === null) return
+      const prev = useStore.getState().selectedId
+      // Remember the previous cell so `M` has something to merge with.
+      this.mergePartner = prev !== null && prev !== id ? prev : null
       useStore.setState({ selectedId: id })
       void this.adopt(id)
     })
@@ -143,6 +155,74 @@ export class TableTool implements Tool {
     })
     for (const [id, rect] of diff) this.original.set(id, rect)
     this.deps.requestDraw()
+  }
+
+  /**
+   * `S` splits the selected cell along the axis it is longest in; `M` merges
+   * the selected cell with the last-selected neighbour. Both commit in one
+   * transaction so undo is one keystroke. No mesh or no selection is a no-op —
+   * the FUNSD corpus has no tables at all.
+   */
+  onKeyDown(e: KeyboardEvent): void {
+    if (e.metaKey || e.ctrlKey || e.altKey) return
+    const mesh = this.meshState
+    const sel = useStore.getState().selectedId
+    if (!mesh || sel === null) return
+    const cell = mesh.cells.find((c) => c.id === sel)
+    if (!cell) return
+
+    if (e.key === 's' || e.key === 'S') {
+      const meta = this.deps.nodeMeta(sel)
+      if (!meta) return
+      const rect = cellRect(mesh, cell)
+      const axis = rect.w >= rect.h ? 'col' : 'row'
+      const newId = this.deps.allocId()
+      const next = splitCell(mesh, sel, axis, newId)
+      if (next === mesh) return
+      const fresh = next.cells.find((c) => c.id === newId)
+      if (!fresh) return
+      const freshRect = cellRect(next, fresh)
+      this.meshState = next
+      const at = Date.now()
+      const diff = meshEdits(next, this.original)
+      commit('tableSplit', (d) => {
+        for (const [id, r] of diff) {
+          if (id === newId) continue
+          d.edits[id] = { ...d.edits[id], rect: r }
+          d.dirtyAt[id] = at
+        }
+        d.edits[newId] = {
+          created: { page: meta.page, type: NodeType.Cell, parent: meta.parent, order: meta.order },
+          rect: freshRect,
+        }
+        d.dirtyAt[newId] = at
+      })
+      for (const [id, r] of diff) this.original.set(id, r)
+      this.original.set(newId, freshRect)
+      this.deps.requestDraw()
+      return
+    }
+
+    if ((e.key === 'm' || e.key === 'M') && this.mergePartner !== null && this.mergePartner !== sel) {
+      const next = mergeCells(mesh, sel, this.mergePartner)
+      if (next === mesh) return
+      const gone = this.mergePartner
+      this.meshState = next
+      const at = Date.now()
+      const diff = meshEdits(next, this.original)
+      commit('tableMerge', (d) => {
+        for (const [id, r] of diff) {
+          d.edits[id] = { ...d.edits[id], rect: r }
+          d.dirtyAt[id] = at
+        }
+        d.edits[gone] = { ...d.edits[gone], deleted: true }
+        d.dirtyAt[gone] = at
+      })
+      for (const [id, r] of diff) this.original.set(id, r)
+      this.original.delete(gone)
+      this.mergePartner = null
+      this.deps.requestDraw()
+    }
   }
 
   /**

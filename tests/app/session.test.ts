@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Session } from '@/app/session'
-import { indexOfId, NodeType, type Rect } from '@/data/nodes'
+import { FLAG_HIDDEN, indexOfId, NodeType, type Rect } from '@/data/nodes'
 import { createSyntheticDocument } from '@/data/synthetic/source'
 import { serializeGeneratedPage } from '@/data/synthetic/serialize'
 import { commit, redo, resetHistory, undo, useStore } from '@/store/store'
@@ -70,6 +70,8 @@ if (typeof globalThis.Worker === 'undefined') {
   class FakeWorker {
     /** Every updateNode the session sent, in order — asserted by the sync tests. */
     static updates: { nodeId: number; old: Rect; next: Rect }[] = []
+    /** Every insertNode/removeNode the session sent — the structural seam. */
+    static structural: { kind: string; nodeId: number }[] = []
     onmessage: ((e: MessageEvent) => void) | null = null
     onerror: ((e: unknown) => void) | null = null
     postMessage(msg: {
@@ -82,7 +84,16 @@ if (typeof globalThis.Worker === 'undefined') {
       nodeId?: number
       old?: Rect
       next?: Rect
+      node?: { id: number }
     }) {
+      if (msg.kind === 'insertNode' || msg.kind === 'removeNode') {
+        FakeWorker.structural.push({
+          kind: msg.kind,
+          nodeId: msg.node ? msg.node.id : msg.nodeId!,
+        })
+        queueMicrotask(() => this.onmessage?.({ data: { id: msg.id, kind: 'ok' } } as MessageEvent))
+        return
+      }
       if (msg.kind === 'updateNode') {
         FakeWorker.updates.push({ nodeId: msg.nodeId!, old: msg.old!, next: msg.next! })
         queueMicrotask(() => this.onmessage?.({ data: { id: msg.id, kind: 'ok' } } as MessageEvent))
@@ -138,6 +149,10 @@ if (typeof window.requestAnimationFrame === 'undefined') {
 const workerUpdates = () =>
   (globalThis as unknown as { Worker: { updates: { nodeId: number; old: Rect; next: Rect }[] } })
     .Worker.updates
+
+const workerStructural = () =>
+  (globalThis as unknown as { Worker: { structural: { kind: string; nodeId: number }[] } }).Worker
+    .structural
 
 function canvas() {
   const el = document.createElement('canvas')
@@ -495,5 +510,94 @@ describe('table detection', () => {
       vi.useRealTimers()
       useStore.setState({ selectedId: null })
     }
+  })
+})
+
+describe('structural edits', () => {
+  it('materializes a created node and hides a deleted one, both reversibly', async () => {
+    useStore.setState(
+      { edits: {}, dirtyAt: {}, selectedId: null, hoveredId: null, edgesAdded: [], edgesRemoved: [] },
+      true,
+    )
+    resetHistory()
+    workerStructural().length = 0
+    vi.useFakeTimers()
+    try {
+      const s = new Session(canvas(), createSyntheticDocument(4, 1))
+      await s.ready
+      await s.connectStream()
+      for (let i = 0; i < 40 && s.nodes.count === 0; i++) await vi.advanceTimersByTimeAsync(50)
+      expect(s.nodes.count).toBeGreaterThan(0)
+
+      const before = s.nodes.count
+      const victim = s.nodes.ids[0]
+      const fresh = s.allocId()
+      // Streamed ids are `page * 1000 + n`; a created id must be unreachable there.
+      expect(fresh).toBeGreaterThanOrEqual(1_000_000_000)
+
+      const out = new Uint32Array(4096)
+      const inGrid = (id: number, r: Rect) => {
+        const idx = indexOfId(s.nodes, id)
+        const n = s.grid.query(r.x, r.y, r.w, r.h, out)
+        for (let i = 0; i < n; i++) if (out[i] === idx) return true
+        return false
+      }
+      const victimRect = { ...s.rectOf(victim)! }
+      const freshRect = { x: 10, y: 10, w: 20, h: 20 }
+
+      commit('splitCell', (d) => {
+        d.edits[fresh] = {
+          created: { page: 0, type: NodeType.Cell, parent: -1, order: 0 },
+          rect: freshRect,
+        }
+        d.edits[victim] = { ...d.edits[victim], deleted: true }
+        d.dirtyAt[fresh] = Date.now()
+        d.dirtyAt[victim] = Date.now()
+      })
+
+      expect(s.nodes.count).toBe(before + 1)
+      expect(indexOfId(s.nodes, fresh)).toBeGreaterThanOrEqual(0)
+      expect(s.nodes.flags[indexOfId(s.nodes, victim)] & FLAG_HIDDEN).toBe(FLAG_HIDDEN)
+      // All three indexes agree: cull grid, worker QuadTree, render arrays.
+      expect(inGrid(fresh, freshRect)).toBe(true)
+      expect(inGrid(victim, victimRect)).toBe(false)
+      expect(workerStructural()).toEqual([
+        { kind: 'insertNode', nodeId: fresh },
+        { kind: 'removeNode', nodeId: victim },
+      ])
+
+      undo()
+      // The row stays (arrays only grow), but it is hidden and unhittable, and
+      // the victim is visible again.
+      expect(s.nodes.count).toBe(before + 1)
+      expect(s.nodes.flags[indexOfId(s.nodes, fresh)] & FLAG_HIDDEN).toBe(FLAG_HIDDEN)
+      expect(s.nodes.flags[indexOfId(s.nodes, victim)] & FLAG_HIDDEN).toBe(0)
+      expect(inGrid(fresh, freshRect)).toBe(false)
+      expect(inGrid(victim, victimRect)).toBe(true)
+
+      redo()
+      expect(s.nodes.count).toBe(before + 1)
+      expect(s.nodes.flags[indexOfId(s.nodes, fresh)] & FLAG_HIDDEN).toBe(0)
+      expect(s.nodes.flags[indexOfId(s.nodes, victim)] & FLAG_HIDDEN).toBe(FLAG_HIDDEN)
+      expect(inGrid(fresh, freshRect)).toBe(true)
+      expect(inGrid(victim, victimRect)).toBe(false)
+
+      s.dispose()
+    } finally {
+      vi.useRealTimers()
+      useStore.setState(
+        { edits: {}, dirtyAt: {}, selectedId: null, hoveredId: null, edgesAdded: [], edgesRemoved: [] },
+        true,
+      )
+      resetHistory()
+    }
+  })
+
+  it('allocates ids monotonically and never reuses one', () => {
+    const s = new Session(canvas(), createSyntheticDocument(1, 1))
+    const a = s.allocId()
+    const b = s.allocId()
+    expect(b).toBe(a + 1)
+    s.dispose()
   })
 })

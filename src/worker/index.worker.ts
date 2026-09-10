@@ -139,6 +139,36 @@ self.onmessage = (e: MessageEvent<Req>) => {
         reply({ id: msg.id, kind: 'ok' })
         break
       }
+      case 'insertNode': {
+        const n = msg.node
+        // A node id can be re-inserted (redo of a creation, or unhiding a
+        // merged-away cell): reuse its row rather than appending a duplicate.
+        const existing = indexById.get(n.id)
+        const i =
+          existing ??
+          pushNode(nodes, {
+            id: n.id, page: n.page, x: n.x, y: n.y, w: n.w, h: n.h,
+            type: n.type as NodeType, parent: n.parent, order: n.order,
+          })
+        if (existing !== undefined) {
+          const c = existing * 4
+          nodes.coords[c] = n.x
+          nodes.coords[c + 1] = n.y
+          nodes.coords[c + 2] = n.w
+          nodes.coords[c + 3] = n.h
+        }
+        indexById.set(n.id, i)
+        tree.insert(n.id, n.x, n.y, n.w, n.h)
+        reply({ id: msg.id, kind: 'ok' })
+        break
+      }
+      case 'removeNode': {
+        // The row stays in `nodes` (indices are stable and referenced by
+        // `indexById`); dropping it from the tree is what makes it unhittable.
+        tree.remove(msg.nodeId, msg.rect.x, msg.rect.y, msg.rect.w, msg.rect.h)
+        reply({ id: msg.id, kind: 'ok' })
+        break
+      }
     }
   } catch (err) {
     // One bad payload must never poison the document.

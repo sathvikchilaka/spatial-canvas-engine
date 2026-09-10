@@ -78,13 +78,28 @@ export class Session {
   private readonly created = new Set<number>()
   /** Nodes currently hidden by a `deleted` edit, so undo can unhide exactly those. */
   private readonly hidden = new Set<number>()
+  /**
+   * Page indices already ingested this session. A reconnect (`SseStreamSource`
+   * backs off and retries) restarts the feed from page 0 with no resume
+   * support server-side, so every page arrives again; skipping an index
+   * already in this set is what keeps a reconnect from duplicating every
+   * unedited node into `nodes`/`grid`.
+   */
+  private readonly ingestedPages = new Set<number>()
   private stream: StreamSource | null = null
   /** Set by `dispose()`. Guards every continuation that resumes after an await. */
   private disposed = false
   private streamQueue: StreamEvent[] = []
   private drainTimer = 0
   /** Reported to the UI: pages seen, and edits the shield preserved. */
-  status = { pagesReceived: 0, shielded: 0, connected: false, done: false, transport: 'replay' as 'sse' | 'replay' }
+  status = {
+    pagesReceived: 0,
+    shielded: 0,
+    connected: false,
+    done: false,
+    transport: 'replay' as 'sse' | 'replay',
+    failed: 0,
+  }
   private onStatusChange: (() => void) | null = null
 
   constructor(canvas: HTMLCanvasElement, doc: DocumentSource) {
@@ -145,6 +160,16 @@ export class Session {
     this.tool = this.selectTool
 
     this.detachers.push(this.worker.onPageIngested((p) => this.onPageIngested(p)))
+    this.detachers.push(
+      this.worker.onError((err) => {
+        // ingestUrl is fire-and-forget (UNSOLICITED) — this is the only signal
+        // a failed fetch/parse for that path ever produces.
+        if (this.disposed) return
+        console.warn('worker ingest failed', err)
+        this.status.failed++
+        this.onStatusChange?.()
+      }),
+    )
     this.detachers.push(this.engine.addOverlay((ctx, vp) => this.drawOrder(ctx, vp.scale)))
     this.detachers.push(this.engine.addOverlay((ctx, vp) => this.drawHover(ctx, vp.scale)))
     this.detachers.push(this.engine.addOverlay((ctx, vp) => this.tool.drawHud(ctx, vp)))
@@ -187,7 +212,15 @@ export class Session {
     // still pending. Without this guard the continuation installs a live source
     // on a corpse: its timers fire forever into a terminated worker.
     if (this.disposed) return
-    const source = await Promise.resolve(this.doc.createStream())
+    const source = await Promise.resolve(
+      this.doc.createStream((connected) => {
+        // Live disconnect/reconnect after the initial connect — SseStreamSource
+        // backs off and retries on error, so this can fire repeatedly.
+        if (this.disposed) return
+        this.status.connected = connected
+        this.onStatusChange?.()
+      }),
+    )
     if (this.disposed) return
     this.stream = source
     this.status.transport = source instanceof SseStreamSource ? 'sse' : 'replay'
@@ -220,7 +253,10 @@ export class Session {
           void this.worker
             .ingestJson(e.pageIndex, e.payload, this.pageRect[0], this.pageRect[1])
             .catch((err) => {
-              if (!this.disposed) console.warn('page ingest failed', e.pageIndex, err)
+              if (this.disposed) return
+              console.warn('page ingest failed', e.pageIndex, err)
+              this.status.failed++
+              this.onStatusChange?.()
             })
         } else {
           this.worker.ingestUrl(e.pageIndex, e.url, this.pageRect[0], this.pageRect[1])
@@ -238,6 +274,11 @@ export class Session {
    * late-arriving page can never clobber a box the human already edited.
    */
   private onPageIngested(p: PageIngested) {
+    // Reconnect replays the whole feed from page 0 with no resume support —
+    // skip a page already ingested rather than re-pushing every node into
+    // `nodes`/`grid` as a ghost duplicate.
+    if (this.ingestedPages.has(p.pageIndex)) return
+    this.ingestedPages.add(p.pageIndex)
     const indices = new Uint32Array(p.ids.length)
     for (let i = 0; i < p.ids.length; i++) {
       const c = i * 4

@@ -14,6 +14,7 @@ type Props = {
   connected: boolean
   done: boolean
   transport: "sse" | "replay"
+  failed: number
 }
 
 export function StatusBar({
@@ -27,6 +28,7 @@ export function StatusBar({
   connected,
   done,
   transport,
+  failed,
 }: Props) {
   return (
     <footer className="flex items-center gap-4 border-t border-border bg-card px-4 py-1.5 font-mono text-xs text-muted-foreground">
@@ -53,6 +55,7 @@ export function StatusBar({
         {done ? "stream complete" : connected ? "streaming" : "disconnected"} · {pagesReceived} pages
       </span>
       {shielded > 0 && <span className="text-amber-400">{shielded} edits preserved</span>}
+      {failed > 0 && <span className="text-destructive">{failed} pages failed</span>}
     </footer>
   )
 }

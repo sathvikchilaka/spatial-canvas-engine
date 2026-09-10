@@ -27,6 +27,7 @@ export function App() {
     connected: false,
     done: false,
     transport: "replay" as "sse" | "replay",
+    failed: 0,
   })
   const [tool, setTool] = useState<ToolName>("select")
   const [docId, setDocId] = useState<DocumentId>("funsd")
@@ -145,7 +146,14 @@ export function App() {
       w.__pick = null
       w.__ingest = null
       setNodes(null)
-      setStream({ pagesReceived: 0, shielded: 0, connected: false, done: false })
+      setStream({
+        pagesReceived: 0,
+        shielded: 0,
+        connected: false,
+        done: false,
+        transport: "replay",
+        failed: 0,
+      })
       useStore.setState(
         { edits: {}, dirtyAt: {}, selectedId: null, hoveredId: null, edgesAdded: [], edgesRemoved: [] },
         true,

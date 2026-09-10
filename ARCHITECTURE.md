@@ -330,15 +330,17 @@ design gap.
 
 ## 8. Known limitations & trade-offs
 
-- The shipped stream is an SSE-shaped replay, not a live `EventSource` (§2). The client and the
-  dev server exist and the interface is the one a real endpoint would satisfy, but wiring the
-  endpoint probe into `createStream()` is unfinished work, not a design position.
 - The SSE endpoint is a dev-server process, so the deployed demo runs the replay transport. Making
   the live path reachable in production means hosting a long-lived process, which is a deployment
   decision rather than an architectural one — the client is transport-agnostic either way.
-- The envelope is bespoke rather than a standard (`event:` names, `id:` for resume). Resume-on-
-  reconnect would need the server to remember what each client received; the replay's determinism
-  covers the demo's needs.
+- The envelope is bespoke rather than a standard (`event:` names, `id:` for resume), and the dev
+  server has no resume support — a reconnect restarts the shuffle from page 0. Rather than a
+  server-side replay/merge, the client handles this with a skip strategy: `Session` tracks which
+  page indices it has already ingested and drops a page it sees again, so a mid-feed reconnect
+  cannot duplicate nodes, but it also cannot recover a page that failed before the reconnect any
+  faster than the replay reaching it again. A real resume (`Last-Event-ID`, server-side merge)
+  would need the server to remember what each client received; the replay's determinism covers the
+  demo's needs without it.
 - Sequence numbers are a DFS pre-order over a graph that is not required to be a tree. For a
   FUNSD question with three answers the numbering is one valid reading, not the only one; the
   brief asks the flow to be visible and editable, not to be linearised canonically.

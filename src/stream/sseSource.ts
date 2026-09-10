@@ -3,8 +3,9 @@ import type { StreamEvent, StreamSource } from './source'
 /**
  * The wire envelope, kept deliberately tiny: `t` for type, `i` for page index,
  * `d` for the page body as a string. Only the envelope is parsed on the main
- * thread; the body — tens of KB per page — is forwarded to the worker
- * untouched, which is what keeps ingest off the 16ms budget.
+ * thread; the body — tens of KB per page — is forwarded to the worker as a
+ * string, so no document structure is materialised on the main thread, which
+ * is what keeps ingest off the 16ms budget.
  */
 
 const RECONNECT_BASE_MS = 500
@@ -94,8 +95,9 @@ export class SseStreamSource implements StreamSource {
  * worse than no feed — pages would go missing with no error anywhere — so
  * disagreement falls back rather than being trusted.
  *
- * The endpoint exists only under `pnpm dev` (`vite.config.ts` proxies
- * `/events`); `vite preview` and a static deploy have none. The fallback is
+ * The endpoint exists only under `pnpm dev:sse`/`pnpm dev:all` (`vite.config.ts`
+ * proxies `/events` to `server/sse.mjs`, which those scripts start); bare
+ * `pnpm dev`, `vite preview`, and a static deploy have none. The fallback is
  * therefore the normal path in production, not an error case.
  */
 export async function createStreamSource(opts: {

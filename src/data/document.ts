@@ -13,7 +13,10 @@ export interface DocumentSource {
   raster(page: number): Promise<PageBitmap>
   /**
    * The transport for this document. May be async because the live endpoint is
-   * probed before the replay is chosen.
+   * probed before the replay is chosen. `onStatus`, when given, is wired
+   * through to the live source (if one is adopted) so callers learn about
+   * connect/disconnect/reconnect after the initial call returns; a document
+   * whose transport never goes live (e.g. synthetic) can ignore it.
    */
-  createStream(): StreamSource | Promise<StreamSource>
+  createStream(onStatus?: (connected: boolean) => void): StreamSource | Promise<StreamSource>
 }

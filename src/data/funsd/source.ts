@@ -26,10 +26,11 @@ export async function createFunsdDocument(): Promise<DocumentSource> {
       if (!img.ok) throw new Error(`funsd image ${pages[page].id} missing`)
       return (await createImageBitmap(await img.blob())) as PageBitmap
     },
-    createStream() {
+    createStream(onStatus) {
       return createStreamSource({
         expectPages: pages.length,
         fallback: () => new FunsdStreamSource(pages.map((p) => p.id)),
+        onStatus,
       })
     },
   }

@@ -855,18 +855,16 @@ describe('labels', () => {
 
 describe('dirty shield end to end', () => {
   /**
-   * Plan 2 (canvas-correctness) built the shield in `applyPageUpdate` and
-   * asserted it in isolation against `merge.ts`, but no live path ever drove
-   * it through a real `Session`: the mock/replay sources never redelivered a
-   * page for a node the reviewer had already edited. Task 4/5 wire up a real
-   * out-of-order feed where that can genuinely happen (a reconnect can
-   * redeliver a page already ingested), so this drives the real path — edit a
-   * node via the store, then feed a second `pageIngested` reply for the same
-   * id through the actual `WorkerClient` the session listens on (not a call
-   * into `merge.ts` directly) — and asserts both that `status.shielded`
-   * increments and that the human's edit is still what the reviewer sees.
+   * A reconnect (`SseStreamSource` backs off and retries) can redeliver a page
+   * already ingested — the dev SSE server has no resume support and restarts
+   * the shuffle from page 0. `Session.onPageIngested` now skips a page index
+   * it has already ingested, so a redelivery is a no-op: it must not push a
+   * duplicate row, must not bump `status.shielded`/`pagesReceived` again, and
+   * the human's edit — never touched by the skip — must still read back
+   * exactly as they left it. This drives the real path through the actual
+   * `WorkerClient` the session listens on, not a call into `merge.ts` directly.
    */
-  it('shields a human edit from a late duplicate page delivery', async () => {
+  it('skips a late duplicate page delivery, leaving a human edit untouched', async () => {
     useStore.setState(
       { edits: {}, dirtyAt: {}, selectedId: null, hoveredId: null, edgesAdded: [], edgesRemoved: [] },
       true,
@@ -892,6 +890,7 @@ describe('dirty shield end to end', () => {
 
       const shieldedBefore = s.status.shielded
       const pagesBefore = s.status.pagesReceived
+      const countBefore = s.nodes.count
 
       // A late-arriving duplicate delivery for the same id, with a
       // different rect — exactly what a reconnect-triggered redelivery of an
@@ -914,13 +913,16 @@ describe('dirty shield end to end', () => {
       } as PageIngested & { id: number }
       ;(s.worker as unknown as { receive: (msg: Res) => void }).receive(dup)
 
-      expect(s.status.shielded).toBe(shieldedBefore + 1)
-      expect(s.status.pagesReceived).toBe(pagesBefore + 1)
+      // The page index was already ingested — the redelivery is skipped
+      // outright: no new row, no shield accounting, no status bump.
+      expect(s.status.shielded).toBe(shieldedBefore)
+      expect(s.status.pagesReceived).toBe(pagesBefore)
+      expect(s.nodes.count).toBe(countBefore)
 
       // A subsequent store change (the same trigger every real edit or
-      // selection produces) re-asserts the human's edit over whatever the
-      // duplicate just pushed into the render arrays — the edit must not be
-      // the one that got clobbered.
+      // selection produces) re-asserts the human's edit — nothing should have
+      // moved it in the first place, since the duplicate never touched the
+      // render arrays.
       useStore.setState({ hoveredId: null })
       expect(s.rectOf(id)?.x).toBe(999)
       expect(s.rectOf(id)?.y).toBe(998)

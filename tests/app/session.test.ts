@@ -6,6 +6,7 @@ import { createSyntheticDocument } from '@/data/synthetic/source'
 import { serializeGeneratedPage } from '@/data/synthetic/serialize'
 import { canUndo, commit, redo, resetHistory, undo, useStore } from '@/store/store'
 import type { PageIngested, Res } from '@/worker/protocol'
+import { SemanticLabel } from '@/worker/protocol'
 import type { TableTool } from '@/tools/tableTool'
 
 /**
@@ -767,6 +768,55 @@ describe('structural edits', () => {
     redo()
     expect(s.allocId()).toBeGreaterThan(created)
     expect(seen.has(created)).toBe(false)
+    s.dispose()
+  })
+})
+
+describe('labels', () => {
+  it('relabelling changes the node type, repaints, and is undoable', async () => {
+    useStore.setState(
+      { edits: {}, dirtyAt: {}, selectedId: null, hoveredId: null, edgesAdded: [], edgesRemoved: [] },
+      true,
+    )
+    resetHistory()
+    vi.useFakeTimers()
+    try {
+      const s = new Session(canvas(), createSyntheticDocument(4, 1))
+      await s.ready
+      await s.connectStream()
+      for (let i = 0; i < 40 && s.nodes.count === 0; i++) await vi.advanceTimersByTimeAsync(50)
+
+      const id = s.nodes.ids[0]
+      const baseType = s.nodes.types[0]
+
+      s.setLabel(id, SemanticLabel.Header)
+      expect(s.labelOf(id)).toBe(SemanticLabel.Header)
+      expect(s.baseLabelOf(id)).not.toBe(SemanticLabel.Header)
+      expect(s.nodes.types[0]).toBe(NodeType.Paragraph)
+      expect(useStore.getState().dirtyAt[id]).toBeGreaterThan(0)
+
+      undo()
+      expect(s.labelOf(id)).toBe(s.baseLabelOf(id))
+      expect(s.nodes.types[0]).toBe(baseType)
+
+      redo()
+      expect(s.nodes.types[0]).toBe(NodeType.Paragraph)
+      s.dispose()
+    } finally {
+      vi.useRealTimers()
+      useStore.setState(
+        { edits: {}, dirtyAt: {}, selectedId: null, hoveredId: null, edgesAdded: [], edgesRemoved: [] },
+        true,
+      )
+      resetHistory()
+    }
+  })
+
+  it('returns empty text for a document with none, without throwing', async () => {
+    const s = new Session(canvas(), createSyntheticDocument(1, 1))
+    await s.ready
+    expect(s.textOf(123456)).toBe('')
+    expect(s.labelOf(123456)).toBe(SemanticLabel.None)
     s.dispose()
   })
 })

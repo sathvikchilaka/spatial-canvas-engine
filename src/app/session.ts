@@ -5,7 +5,7 @@ import { BucketGrid } from '@/engine/bucketGrid'
 import { CanvasEngine } from '@/engine/engine'
 import { attachInput } from '@/engine/input'
 import { screenToWorld } from '@/engine/viewport'
-import { redo, setUiState, undo, useStore, type AppState, type Edit } from '@/store/store'
+import { commit, redo, setUiState, undo, useStore, type AppState, type Edit } from '@/store/store'
 import { toolHandlers } from '@/tools/adapter'
 import { OrderTool } from '@/tools/orderTool'
 import { SelectTool } from '@/tools/selectTool'
@@ -16,7 +16,8 @@ import type { Tool } from '@/tools/types'
 import { applyPageUpdate } from '@/store/merge'
 import type { StreamEvent, StreamSource } from '@/stream/source'
 import { WorkerClient } from '@/worker/client'
-import type { PageIngested } from '@/worker/protocol'
+import { SemanticLabel, type PageIngested } from '@/worker/protocol'
+import { labelFromName, labelName, TYPE_OF_LABEL } from '@/data/labels'
 
 const WORLD: Rect = { x: -2000, y: -2000, w: 20000, h: 400000 }
 
@@ -59,6 +60,15 @@ export class Session {
   private baseCoords = new Float32Array(1024 * 4)
   /** Node ids whose `nodes.coords` currently hold an edit, not the stream value. */
   private readonly overridden = new Set<number>()
+  /** Node ids whose `nodes.types` currently hold a relabel edit, not the base type. */
+  private readonly labelOverridden = new Set<number>()
+  /**
+   * Text and labels live in maps, not in the typed arrays: text is
+   * variable-length and non-numeric, and both are read by React chrome on
+   * selection rather than by the draw loop on every frame.
+   */
+  private readonly texts = new Map<number, string>()
+  private readonly baseLabels = new Map<number, SemanticLabel>()
   /** Ids the reviewer created. Far above any streamed id (`page * 1000 + n`). */
   private nextLocalId = 1_000_000_000
   /** Created nodes already pushed into `nodes` — pushes are irreversible, so this is the mirror. */
@@ -227,6 +237,11 @@ export class Session {
       })
     }
     this.rememberBase(indices, p.coords)
+    for (let i = 0; i < p.ids.length; i++) {
+      const id = p.ids[i]
+      if (p.texts[i]) this.texts.set(id, p.texts[i])
+      if (p.labels[i]) this.baseLabels.set(id, p.labels[i] as SemanticLabel)
+    }
     this.grid.addPage(p.pageIndex, p.ids, p.coords, indices)
     if (p.edges.length > 0) {
       appendEdges(this.baseEdges, p.edges)
@@ -375,6 +390,29 @@ export class Session {
       scale,
       tx: w / 2 - (r.x + r.w / 2) * scale,
       ty: h / 2 - (r.y + r.h / 2) * scale,
+    })
+  }
+
+  textOf(id: number): string {
+    return this.texts.get(id) ?? ''
+  }
+
+  baseLabelOf(id: number): SemanticLabel {
+    return this.baseLabels.get(id) ?? SemanticLabel.None
+  }
+
+  /** The label the UI shows: the human's if they set one, else the extraction's. */
+  labelOf(id: number): SemanticLabel {
+    const override = useStore.getState().edits[id]?.label
+    return override === undefined ? this.baseLabelOf(id) : labelFromName(override)
+  }
+
+  setLabel(id: number, label: SemanticLabel): void {
+    const name = labelName(label)
+    if (name === labelName(this.labelOf(id))) return
+    commit('relabel', (d) => {
+      d.edits[id] = { ...d.edits[id], label: name }
+      d.dirtyAt[id] = Date.now()
     })
   }
 
@@ -636,12 +674,44 @@ export class Session {
   private applyEdits(edits: Record<number, Edit>) {
     for (const key of Object.keys(edits)) {
       const id = Number(key)
-      const rect = edits[id]?.rect
-      if (!rect) continue
-      const i = indexOfId(this.nodes, id)
-      if (i < 0) continue
-      this.writeCoords(id, i, rect)
-      this.overridden.add(id)
+      const edit = edits[id]
+      const rect = edit?.rect
+      if (rect) {
+        const i = indexOfId(this.nodes, id)
+        if (i >= 0) {
+          this.writeCoords(id, i, rect)
+          this.overridden.add(id)
+        }
+      }
+
+      // A label edit repaints the box, so it has to reach `nodes.types`.
+      if (edit?.label !== undefined) {
+        const i = indexOfId(this.nodes, id)
+        if (i >= 0) {
+          const wantType = TYPE_OF_LABEL[labelFromName(edit.label)]
+          if (this.nodes.types[i] !== wantType) {
+            this.nodes.types[i] = wantType
+          }
+          this.labelOverridden.add(id)
+        }
+      }
+    }
+    if (this.labelOverridden.size > 0) {
+      for (const id of this.labelOverridden) {
+        if (edits[id]?.label !== undefined) continue
+        this.labelOverridden.delete(id)
+        // Guard: for the synthetic document `baseLabelOf` is `None` →
+        // `NodeType.Paragraph`, which would flatten every `Line`/`Cell`
+        // back to `Paragraph` on revert. Only nodes with a real streamed
+        // label are touched.
+        if (!this.baseLabels.has(id)) continue
+        const i = indexOfId(this.nodes, id)
+        if (i < 0) continue
+        const baseType = TYPE_OF_LABEL[this.baseLabelOf(id)]
+        if (this.nodes.types[i] !== baseType) {
+          this.nodes.types[i] = baseType
+        }
+      }
     }
     if (this.overridden.size === 0) return
     for (const id of this.overridden) {
@@ -713,6 +783,9 @@ export class Session {
     for (const off of this.detachers) off()
     this.detachers.length = 0
     this.overridden.clear()
+    this.labelOverridden.clear()
+    this.texts.clear()
+    this.baseLabels.clear()
     this.created.clear()
     this.hidden.clear()
     this.engine.dispose()

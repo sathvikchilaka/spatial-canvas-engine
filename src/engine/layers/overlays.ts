@@ -69,6 +69,13 @@ export class OrderOverlay {
     ctx.restore()
   }
 
+  /**
+   * The node's reading position, not its out-degree. Out-degree answered the
+   * wrong question — a question node linking three answers showed "3" while the
+   * reviewer wanted to know where in the flow it sat. The number comes from
+   * `EdgeSet.sequence`, precomputed on graph change, so this stays a map lookup
+   * inside the frame loop.
+   */
   private drawBadges(
     ctx: CanvasRenderingContext2D,
     nodes: NodeArrays,
@@ -76,16 +83,17 @@ export class OrderOverlay {
     visibleCount: number,
     scale: number,
   ) {
+    if (this.edges.sequence.size === 0) return
     ctx.fillStyle = 'rgba(255,255,255,0.75)'
     ctx.font = `${11 / scale}px ui-monospace, monospace`
     ctx.textBaseline = 'top'
     const cap = Math.min(visibleCount, MAX_ARROWS)
     for (let k = 0; k < cap; k++) {
       const i = visible[k]
-      const targets = this.edges.adjacency.get(i)
-      if (!targets || targets.length === 0) continue
+      const n = this.edges.sequence.get(nodes.ids[i])
+      if (n === undefined) continue
       const c = i * 4
-      ctx.fillText(String(targets.length), nodes.coords[c] + 2 / scale, nodes.coords[c + 1] + 2 / scale)
+      ctx.fillText(String(n), nodes.coords[c] + 2 / scale, nodes.coords[c + 1] + 2 / scale)
     }
   }
 }

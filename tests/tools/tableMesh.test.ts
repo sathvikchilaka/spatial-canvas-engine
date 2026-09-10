@@ -1,5 +1,19 @@
-import { describe, it, expect } from 'vitest'
-import { buildMesh, cellRect, type CellInput } from '@/tools/tableMesh'
+import { describe, it, expect } from "vitest"
+import {
+  buildMesh,
+  cellRect,
+  MIN_BAND,
+  type CellInput,
+  type Mesh,
+} from "@/tools/tableMesh"
+
+/** Shared invariant: derived lines are always strictly increasing. */
+export function expectMonotonic(mesh: Mesh): void {
+  for (let i = 1; i < mesh.rows.length; i++)
+    expect(mesh.rows[i]).toBeGreaterThan(mesh.rows[i - 1])
+  for (let i = 1; i < mesh.cols.length; i++)
+    expect(mesh.cols[i]).toBeGreaterThan(mesh.cols[i - 1])
+}
 
 /**
  * Shaped like the synthetic generator's tables: cells carry a 6px inset inside
@@ -24,50 +38,139 @@ function insetGrid(rows = 3, cols = 2, colW = 50, rowH = 20): CellInput[] {
   return out
 }
 
-describe('buildMesh', () => {
-  it('places one divider between adjacent bands, not one per cell edge', () => {
+describe("buildMesh", () => {
+  it("places one divider between adjacent bands, not one per cell edge", () => {
     const m = buildMesh(insetGrid())
+    expectMonotonic(m)
     expect(m.cols).toHaveLength(3)
     expect(m.rows).toHaveLength(4)
   })
 
-  it('anchors outer lines on the outermost cell edges', () => {
+  it("anchors outer lines on the outermost cell edges", () => {
     const m = buildMesh(insetGrid())
+    expectMonotonic(m)
     expect(m.cols[0]).toBe(106)
     expect(m.cols[2]).toBe(194)
     expect(m.rows[0]).toBe(206)
     expect(m.rows[3]).toBe(254)
   })
 
-  it('puts interior lines midway between neighbouring bands', () => {
+  it("puts interior lines midway between neighbouring bands", () => {
     const m = buildMesh(insetGrid())
+    expectMonotonic(m)
     // band 0 ends at 144, band 1 starts at 156 → divider at 150
     expect(m.cols[1]).toBe(150)
     expect(m.rows[1]).toBe(220)
   })
 
-  it('keeps every cell, with span 1 and its band indices', () => {
+  it("keeps every cell, with span 1 and its band indices", () => {
     const m = buildMesh(insetGrid())
+    expectMonotonic(m)
     expect(m.cells).toHaveLength(6)
     expect(m.cells.map((c) => c.id)).toEqual([1, 2, 3, 4, 5, 6])
-    expect(m.cells[0]).toEqual({ id: 1, row: 0, col: 0, rowSpan: 1, colSpan: 1 })
-    expect(m.cells[5]).toEqual({ id: 6, row: 2, col: 1, rowSpan: 1, colSpan: 1 })
+    expect(m.cells[0]).toEqual({
+      id: 1,
+      row: 0,
+      col: 0,
+      rowSpan: 1,
+      colSpan: 1,
+    })
+    expect(m.cells[5]).toEqual({
+      id: 6,
+      row: 2,
+      col: 1,
+      rowSpan: 1,
+      colSpan: 1,
+    })
   })
 
-  it('reports bounds as the outer lines', () => {
-    expect(buildMesh(insetGrid()).bounds).toEqual({ x: 106, y: 206, w: 88, h: 48 })
+  it("reports bounds as the outer lines", () => {
+    const m = buildMesh(insetGrid())
+    expectMonotonic(m)
+    expect(m.bounds).toEqual({ x: 106, y: 206, w: 88, h: 48 })
   })
 
-  it('detects a cell that already spans two columns', () => {
+  it("detects a cell that already spans two columns", () => {
     const cells = insetGrid()
     // Widen cell 1 so it covers both column bands.
     cells[0] = { id: 1, x: 106, y: 206, w: 88, h: 14 }
     const m = buildMesh(cells)
+    expectMonotonic(m)
     expect(m.cells.find((c) => c.id === 1)!.colSpan).toBe(2)
   })
 
-  it('returns an empty mesh for no cells rather than throwing', () => {
+  it("detects a cell that already spans two rows without drifting a divider", () => {
+    const cells = insetGrid()
+    // Cell 1 covers row bands 0 and 1 (206..234).
+    cells[0] = { id: 1, x: 106, y: 206, w: 38, h: 28 }
+    const m = buildMesh(cells)
+    expectMonotonic(m)
+    expect(m.cells.find((c) => c.id === 1)!.rowSpan).toBe(2)
+    // The spanning cell is excluded from band definition, so the interior dividers
+    // stay exactly where the unspanned rows put them (240, not 241).
+    expect(m.rows).toEqual([206, 220, 240, 254])
+  })
+
+  it("keeps a ragged column in one band", () => {
+    const cells = insetGrid()
+    // Misalign one column-0 cell by 10px — far beyond MIN_BAND.
+    cells[0] = { ...cells[0], x: cells[0].x + 10 }
+    const m = buildMesh(cells)
+    expectMonotonic(m)
+    expect(m.cols).toHaveLength(3)
+    expect(m.cells.every((c) => c.colSpan === 1)).toBe(true)
+  })
+
+  it("bounds contain every input cell when extents disagree", () => {
+    const cells: CellInput[] = [
+      { id: 1, x: 0, y: 0, w: 10, h: 10 },
+      { id: 2, x: 5, y: 0, w: 25, h: 10 },
+    ]
+    const m = buildMesh(cells)
+    expectMonotonic(m)
+    for (const c of cells) {
+      expect(m.bounds.x).toBeLessThanOrEqual(c.x)
+      expect(m.bounds.y).toBeLessThanOrEqual(c.y)
+      expect(m.bounds.x + m.bounds.w).toBeGreaterThanOrEqual(c.x + c.w)
+      expect(m.bounds.y + m.bounds.h).toBeGreaterThanOrEqual(c.y + c.h)
+    }
+  })
+
+  it("handles a single cell", () => {
+    const m = buildMesh([{ id: 7, x: 10, y: 20, w: 30, h: 40 }])
+    expectMonotonic(m)
+    expect(m.cols).toEqual([10, 40])
+    expect(m.rows).toEqual([20, 60])
+    expect(m.cells).toEqual([{ id: 7, row: 0, col: 0, rowSpan: 1, colSpan: 1 }])
+  })
+
+  it("is independent of input order", () => {
+    const a = buildMesh(insetGrid())
+    const b = buildMesh([...insetGrid()].reverse())
+    expectMonotonic(b)
+    expect(b.rows).toEqual(a.rows)
+    expect(b.cols).toEqual(a.cols)
+  })
+
+  it("drops non-finite cells rather than propagating NaN", () => {
+    const m = buildMesh([
+      ...insetGrid(),
+      { id: 99, x: NaN, y: 0, w: Infinity, h: 1 },
+    ])
+    expectMonotonic(m)
+    expect(m.cells.some((c) => c.id === 99)).toBe(false)
+    expect(m.bounds).toEqual({ x: 106, y: 206, w: 88, h: 48 })
+  })
+
+  it("pins MIN_BAND as a drag constraint, not a derivation tolerance", () => {
+    // Band derivation is tolerance-free (occupancy gaps), so this value only ever
+    // limits what a divider drag may leave behind.
+    expect(MIN_BAND).toBe(8)
+  })
+
+  it("returns an empty mesh for no cells rather than throwing", () => {
     const m = buildMesh([])
+    expectMonotonic(m)
     expect(m.cells).toEqual([])
     expect(m.rows).toEqual([])
     expect(m.cols).toEqual([])
@@ -75,18 +178,32 @@ describe('buildMesh', () => {
   })
 })
 
-describe('cellRect', () => {
-  it('re-derives a cell rect from the mesh lines', () => {
+describe("cellRect", () => {
+  it("re-derives a cell rect from the mesh lines", () => {
     const m = buildMesh(insetGrid())
+    expectMonotonic(m)
     expect(cellRect(m, m.cells[0])).toEqual({ x: 106, y: 206, w: 44, h: 14 })
   })
 
-  it('covers the whole span of a spanning cell', () => {
+  it("covers the whole span of a spanning cell", () => {
     const m = buildMesh(insetGrid())
+    expectMonotonic(m)
     // rows = [206, 220, 240, 254]: row band extents are [206,214],[226,234],[246,254],
     // so interior dividers sit at band midpoints (220, 240), not band edges. A cell
     // spanning row 0..2 therefore covers rows[0]->rows[2] = 206->240, i.e. h = 34.
     const spanning = { id: 1, row: 0, col: 0, rowSpan: 2, colSpan: 2 }
     expect(cellRect(m, spanning)).toEqual({ x: 106, y: 206, w: 88, h: 34 })
+  })
+
+  it("returns a zero rect on a degenerate mesh", () => {
+    const empty = buildMesh([])
+    expect(
+      cellRect(empty, { id: 1, row: 0, col: 0, rowSpan: 1, colSpan: 1 })
+    ).toEqual({
+      x: 0,
+      y: 0,
+      w: 0,
+      h: 0,
+    })
   })
 })

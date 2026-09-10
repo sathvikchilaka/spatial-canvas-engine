@@ -1,7 +1,13 @@
-import type { Rect } from '@/data/nodes'
+import type { Rect } from "@/data/nodes"
 
 /** A cell's place in the mesh. Geometry is always re-derived via `cellRect`. */
-export type MeshCell = { id: number; row: number; col: number; rowSpan: number; colSpan: number }
+export type MeshCell = {
+  id: number
+  row: number
+  col: number
+  rowSpan: number
+  colSpan: number
+}
 
 /**
  * A table as N+1 horizontal and M+1 vertical divider lines, in world units.
@@ -9,52 +15,69 @@ export type MeshCell = { id: number; row: number; col: number; rowSpan: number; 
  * shared grid, which is the repair the reviewer is here to make. Cell rects are
  * therefore derived from the lines (`cellRect`), never stored per cell.
  */
-export type Mesh = { rows: number[]; cols: number[]; bounds: Rect; cells: MeshCell[] }
+export type Mesh = {
+  rows: number[]
+  cols: number[]
+  bounds: Rect
+  cells: MeshCell[]
+}
 
-export type CellInput = { id: number; x: number; y: number; w: number; h: number }
-
-/** Smallest band a divider drag may leave behind, world units. */
-export const MIN_BAND = 8
-
-const EMPTY: Mesh = { rows: [], cols: [], bounds: { x: 0, y: 0, w: 0, h: 0 }, cells: [] }
-
-type Band = { lo: number; hi: number }
-
-/**
- * Clusters 1-D points that are within `MIN_BAND` of their neighbour, collapsing
- * near-duplicate edges (e.g. every row's column-0 left edge) into one representative
- * value per cluster.
- */
-function clusterPoints(values: number[]): number[] {
-  const sorted = [...values].sort((a, b) => a - b)
-  const clusters: number[][] = []
-  for (const v of sorted) {
-    const last = clusters[clusters.length - 1]
-    if (last && v - last[last.length - 1] < MIN_BAND) {
-      last.push(v)
-    } else {
-      clusters.push([v])
-    }
-  }
-  return clusters.map((c) => c.reduce((a, b) => a + b, 0) / c.length)
+export type CellInput = {
+  id: number
+  x: number
+  y: number
+  w: number
+  h: number
 }
 
 /**
- * Groups a set of cells' 1-D extents into bands, one per column/row. Cluster the
- * start edges and end edges *separately* (rather than merging overlapping full
- * extents) so a cell that already spans several bands — whose own extent overlaps
- * every band it covers — does not collapse those bands into one. This is what
- * makes inset cells (`w: colW - 12`) collapse into one band per column instead of
- * one per cell edge, while still letting `buildMesh` detect a genuinely spanning
- * cell against the un-collapsed grid.
+ * Smallest band a divider drag may leave behind, world units.
+ *
+ * This is a *drag constraint* only. Band derivation below is tolerance-free — it
+ * uses occupancy gaps, not a misalignment threshold — so tuning this constant can
+ * never silently change how a mesh is derived.
  */
-function bandsOf(extents: { lo: number; hi: number }[]): Band[] {
+export const MIN_BAND = 8
+
+type Band = { lo: number; hi: number }
+type Extent = { lo: number; hi: number }
+
+function emptyMesh(): Mesh {
+  return { rows: [], cols: [], bounds: { x: 0, y: 0, w: 0, h: 0 }, cells: [] }
+}
+
+function median(values: number[]): number {
+  const s = [...values].sort((a, b) => a - b)
+  const mid = s.length >> 1
+  return s.length % 2 === 1 ? s[mid] : (s[mid - 1] + s[mid]) / 2
+}
+
+/**
+ * Bands are *occupancy intervals*: a new band starts only across a genuinely empty
+ * gap, so two cells in the same column misaligned by any amount still overlap and
+ * stay one band. No tolerance constant is involved.
+ *
+ * Cells wider than 1.5x the median extent are set aside first — a cell spanning two
+ * bands must not merge them. (If every extent is excluded we fall back to all of them.)
+ *
+ * Documented limitation: cells sharing an *exact* edge (a table with no insets) touch,
+ * so they land in one band. The synthetic generator always emits a 6px inset, so real
+ * input separates cleanly.
+ */
+function bandsOf(extents: Extent[]): Band[] {
   if (extents.length === 0) return []
-  const los = clusterPoints(extents.map((e) => e.lo))
-  const his = clusterPoints(extents.map((e) => e.hi))
-  const n = Math.min(los.length, his.length)
-  const bands: Band[] = []
-  for (let i = 0; i < n; i++) bands.push({ lo: los[i], hi: his[i] })
+  const med = median(extents.map((e) => e.hi - e.lo))
+  const kept = extents.filter((e) => e.hi - e.lo <= med * 1.5)
+  const use = kept.length > 0 ? kept : extents
+
+  const sorted = [...use].sort((a, b) => a.lo - b.lo)
+  const bands: Band[] = [{ lo: sorted[0].lo, hi: sorted[0].hi }]
+  for (let i = 1; i < sorted.length; i++) {
+    const cur = bands[bands.length - 1]
+    if (sorted[i].lo > cur.hi)
+      bands.push({ lo: sorted[i].lo, hi: sorted[i].hi })
+    else if (sorted[i].hi > cur.hi) cur.hi = sorted[i].hi
+  }
   return bands
 }
 
@@ -62,43 +85,75 @@ function bandsOf(extents: { lo: number; hi: number }[]): Band[] {
 function linesOf(bands: Band[]): number[] {
   if (bands.length === 0) return []
   const lines = [bands[0].lo]
-  for (let i = 1; i < bands.length; i++) lines.push((bands[i - 1].hi + bands[i].lo) / 2)
+  for (let i = 1; i < bands.length; i++)
+    lines.push((bands[i - 1].hi + bands[i].lo) / 2)
   lines.push(bands[bands.length - 1].hi)
   return lines
 }
 
-/** Index of the line nearest `v`. */
-function nearestLine(lines: number[], v: number): number {
+/**
+ * A cell occupies every band whose midpoint falls inside its extent; the placement is
+ * the first such band and the span is the count. Degenerate extents that occupy no
+ * band fall back to the nearest band, span 1.
+ */
+function placeIn(
+  bands: Band[],
+  lo: number,
+  hi: number
+): { index: number; span: number } {
+  let first = -1
+  let count = 0
+  for (let i = 0; i < bands.length; i++) {
+    const mid = (bands[i].lo + bands[i].hi) / 2
+    if (mid >= lo && mid <= hi) {
+      if (first < 0) first = i
+      count++
+    }
+  }
+  if (first >= 0) return { index: first, span: count }
+
+  const c = (lo + hi) / 2
   let best = 0
   let bestD = Infinity
-  for (let i = 0; i < lines.length; i++) {
-    const d = Math.abs(lines[i] - v)
+  for (let i = 0; i < bands.length; i++) {
+    const mid = (bands[i].lo + bands[i].hi) / 2
+    const d = Math.abs(mid - c)
     if (d < bestD) {
       bestD = d
       best = i
     }
   }
-  return best
+  return { index: best, span: 1 }
+}
+
+function finite(c: CellInput): boolean {
+  return (
+    Number.isFinite(c.x) &&
+    Number.isFinite(c.y) &&
+    Number.isFinite(c.w) &&
+    Number.isFinite(c.h)
+  )
 }
 
 /** Derives the divider grid from a table's cell geometry. */
-export function buildMesh(cells: CellInput[]): Mesh {
-  if (cells.length === 0) return { ...EMPTY, rows: [], cols: [], cells: [] }
+export function buildMesh(input: CellInput[]): Mesh {
+  const cells = input.filter(finite)
+  if (cells.length === 0) return emptyMesh()
 
-  const cols = linesOf(bandsOf(cells.map((c) => ({ lo: c.x, hi: c.x + c.w }))))
-  const rows = linesOf(bandsOf(cells.map((c) => ({ lo: c.y, hi: c.y + c.h }))))
+  const colBands = bandsOf(cells.map((c) => ({ lo: c.x, hi: c.x + c.w })))
+  const rowBands = bandsOf(cells.map((c) => ({ lo: c.y, hi: c.y + c.h })))
+  const cols = linesOf(colBands)
+  const rows = linesOf(rowBands)
 
   const placed: MeshCell[] = cells.map((c) => {
-    const col = nearestLine(cols, c.x)
-    const row = nearestLine(rows, c.y)
+    const h = placeIn(colBands, c.x, c.x + c.w)
+    const v = placeIn(rowBands, c.y, c.y + c.h)
     return {
       id: c.id,
-      row,
-      col,
-      // A cell already covering several bands (a merged extraction) keeps its
-      // span rather than being clipped to one band.
-      colSpan: Math.max(1, nearestLine(cols, c.x + c.w) - col),
-      rowSpan: Math.max(1, nearestLine(rows, c.y + c.h) - row),
+      row: v.index,
+      col: h.index,
+      rowSpan: v.span,
+      colSpan: h.span,
     }
   })
 
@@ -117,6 +172,8 @@ export function buildMesh(cells: CellInput[]): Mesh {
 
 /** The rect a cell occupies given the current lines. Allocation is per commit, not per frame. */
 export function cellRect(mesh: Mesh, cell: MeshCell): Rect {
+  if (mesh.cols.length < 2 || mesh.rows.length < 2)
+    return { x: 0, y: 0, w: 0, h: 0 }
   const x0 = mesh.cols[cell.col]
   const y0 = mesh.rows[cell.row]
   const x1 = mesh.cols[Math.min(mesh.cols.length - 1, cell.col + cell.colSpan)]

@@ -43,7 +43,7 @@
 - `SseStreamSource.onmessage` no longer `JSON.parse`s the page body. It parses only the *envelope* — `{"t":"p","i":12,"d":"<json string>"}` for a page, `{"t":"d"}` for done — and forwards `d` as an opaque string. Envelope parsing is a ~30 byte object; the 40KB page body is never touched on the main thread.
 - Produces `export function parseSseEnvelope(data: string): StreamEvent | null` — exported so the envelope contract is testable without an `EventSource`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/stream/source.test.ts`:
 
@@ -76,12 +76,12 @@ describe('parseSseEnvelope', () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `pnpm test -- tests/stream/source.test.ts`
 Expected: FAIL — `parseSseEnvelope` is not exported.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `src/stream/source.ts`:
 
@@ -134,12 +134,12 @@ and in `open()`:
     }
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `pnpm test -- tests/stream/source.test.ts && pnpm typecheck`
 Expected: PASS. The typecheck may flag `MockStreamSource`/`FunsdStreamSource` if they build page events without `url` — they both set `url`, so they satisfy the first union member unchanged.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/stream/source.ts src/stream/sseSource.ts tests/stream/source.test.ts
@@ -162,7 +162,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
   - `WorkerClient.ingestJson(pageIndex: number, json: string, offsetX: number, offsetY: number): Promise<void>` — resolves when the worker acknowledges; the resulting nodes arrive on the existing unsolicited `pageIngested` channel, exactly like `ingestUrl`.
 - The worker's handler is the *same* code path as `ingestUrl` minus the fetch. Extract the shared tail into `ingestForm(pageIndex, text, offsetX, offsetY)` so there is one parser call site, not two.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/worker/client.test.ts`:
 
@@ -193,12 +193,12 @@ describe('ingestJson', () => {
 
 Use the file's existing fake-worker helper names (`fakeWorker.sent` / `.reply` above are placeholders for whatever it already provides — match them).
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `pnpm test -- tests/worker/client.test.ts`
 Expected: FAIL — `client.ingestJson is not a function`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `src/worker/protocol.ts` — add to `Req`:
 
@@ -252,12 +252,12 @@ Then:
   }
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `pnpm test && pnpm typecheck`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/worker tests/worker/client.test.ts
@@ -278,7 +278,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - Consumes: `WorkerClient.ingestJson` (Task 2), `StreamEvent.payload` (Task 1).
 - No new exports. The queue entry the drain loop consumes gains a `payload?: string` beside its `url`, and `scheduleDrain` calls `ingestJson` or `ingestUrl` accordingly.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/app/session.test.ts`. The `FakeWorker` must learn `ingestJson`; extend it to parse the pushed body and reply with the same typed arrays it already builds for `synthetic://`:
 
@@ -322,12 +322,12 @@ describe('inline payload ingest', () => {
 
 Have `FakeWorker.postMessage` push every message onto `globalThis.__fakeWorkerSent` (initialize the array at module scope) and answer `ingestJson` with `{ id: msg.id, kind: 'ok' }`.
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `pnpm test -- tests/app/session.test.ts`
 Expected: FAIL — no `ingestJson` message is ever sent; the session drops the payload event because its queue entry has no `url`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `src/app/session.ts`, the stream handler currently enqueues `{ pageIndex, url }`. Widen it:
 
@@ -366,12 +366,12 @@ and in `scheduleDrain`'s per-entry dispatch, replace the single `ingestUrl` call
 
 Match the surrounding code's actual names for the geometry origin lookup and the existing `ingestUrl` arguments — the only real change is the ternary. A failed ingest is warned and skipped, not thrown: one malformed event must not stop the other 198 pages, and `status.pagesReceived` already tells the reviewer if the count is short.
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `pnpm test && pnpm typecheck && pnpm lint`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/app/session.ts tests/app/session.test.ts
@@ -396,7 +396,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - `HEAD /events` answers `200` with `X-Page-Count: <n>` and `Access-Control-Allow-Origin: *`.
 - Page bodies come from `public/funsd/annotations/<id>.json`, listed from `public/funsd/manifest.json`. If the manifest is missing the server exits with the same message the app uses: `funsd manifest missing — run \`pnpm prepare:funsd\``.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```js
 // tests/stream/sseServer.test.ts
@@ -440,12 +440,12 @@ describe('sse dev server', () => {
 
 Add `server/**` to the `vitest.config.ts` `test.include` globs only if it restricts includes to `tests/**` — the test above lives under `tests/`, so the import path is all that matters. If `allowJs`/`.mjs` resolution complains under `tsc --noEmit`, add `// @ts-expect-error untyped dev-server module` above the import and note why.
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `pnpm test -- tests/stream/sseServer.test.ts`
 Expected: FAIL — `server/sse.mjs` exports nothing.
 
-- [ ] **Step 3: Rewrite `server/sse.mjs`**
+- [x] **Step 3: Rewrite `server/sse.mjs`**
 
 ```js
 // Dev SSE endpoint. Pushes real FUNSD annotation payloads inline, shuffled and
@@ -569,12 +569,12 @@ devDependency — use these, do not invent a `dev:full`:
     "dev:all": "concurrently -k \"pnpm dev\" \"pnpm dev:sse\""
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `pnpm test -- tests/stream/sseServer.test.ts && pnpm typecheck && pnpm lint`
 Expected: PASS.
 
-- [ ] **Step 5: Verify the server by hand**
+- [x] **Step 5: Verify the server by hand**
 
 ```bash
 pnpm prepare:funsd   # if public/funsd is not populated
@@ -584,7 +584,7 @@ curl -sN http://localhost:8787/events | head -c 400            # → data: {"t":
 kill %1
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add server/sse.mjs package.json tests/stream/sseServer.test.ts

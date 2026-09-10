@@ -64,6 +64,10 @@ if (typeof window.matchMedia === 'undefined') {
     dispatchEvent: () => false,
   })) as unknown as typeof window.matchMedia
 }
+;(globalThis as unknown as { __fakeWorkerSent: { kind: string; json?: string }[] }).__fakeWorkerSent =
+  (globalThis as unknown as { __fakeWorkerSent?: { kind: string; json?: string }[] })
+    .__fakeWorkerSent ?? []
+
 if (typeof globalThis.Worker === 'undefined') {
   // Echoes just enough to resolve `WorkerClient.init` and, for `synthetic://`
   // ingestUrl requests, to mirror the real worker's `ingest()` — building the
@@ -87,7 +91,34 @@ if (typeof globalThis.Worker === 'undefined') {
       old?: Rect
       next?: Rect
       node?: { id: number }
+      json?: string
     }) {
+      (globalThis as unknown as { __fakeWorkerSent: { kind: string; json?: string }[] })
+        .__fakeWorkerSent.push({ kind: msg.kind, json: msg.json })
+      if (msg.kind === 'ingestJson') {
+        const pageIndex = msg.pageIndex!
+        // Real worker parses `msg.json` off-thread; the fake must not call
+        // JSON.parse on it either, or it would falsely satisfy the test's
+        // "never parsed on this thread" assertion for the wrong reason.
+        queueMicrotask(() => {
+          const res: Res = {
+            id: msg.id,
+            kind: 'pageIngested',
+            pageIndex,
+            ids: new Uint32Array(0),
+            coords: new Float32Array(0),
+            types: new Uint8Array(0),
+            parents: new Int32Array(0),
+            order: new Int32Array(0),
+            edges: new Int32Array(0),
+            texts: [],
+            labels: new Uint8Array(0),
+          } as PageIngested & { id: number }
+          this.onmessage?.({ data: { id: msg.id, kind: 'ok' } } as MessageEvent)
+          this.onmessage?.({ data: res } as MessageEvent)
+        })
+        return
+      }
       if (msg.kind === 'insertNode' || msg.kind === 'removeNode') {
         FakeWorker.structural.push({
           kind: msg.kind,
@@ -819,5 +850,41 @@ describe('labels', () => {
     expect(s.textOf(123456)).toBe('')
     expect(s.labelOf(123456)).toBe(SemanticLabel.None)
     s.dispose()
+  })
+})
+
+describe('inline payload ingest', () => {
+  it('forwards a payload event to the worker without parsing it on this thread', async () => {
+    const parseSpy = vi.spyOn(JSON, 'parse')
+    vi.useFakeTimers()
+    try {
+      const doc = createSyntheticDocument(2, 1)
+      // A source that pushes one inline page, as a live feed does.
+      const body = JSON.stringify({ form: [] })
+      doc.createStream = () => ({
+        connected: true,
+        start(onEvent) {
+          onEvent({ type: 'page', pageIndex: 0, payload: body })
+          onEvent({ type: 'done' })
+        },
+        stop() {},
+      })
+
+      const s = new Session(canvas(), doc)
+      await s.ready
+      const before = parseSpy.mock.calls.length
+      await s.connectStream()
+      for (let i = 0; i < 20 && !s.status.done; i++) await vi.advanceTimersByTimeAsync(20)
+
+      const sent = (globalThis as unknown as { __fakeWorkerSent: { kind: string; json?: string }[] })
+        .__fakeWorkerSent
+      expect(sent.some((m) => m.kind === 'ingestJson' && m.json === body)).toBe(true)
+      // The session never parsed the body itself.
+      expect(parseSpy.mock.calls.slice(before).some(([arg]) => arg === body)).toBe(false)
+
+      s.dispose()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

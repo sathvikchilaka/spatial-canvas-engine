@@ -206,10 +206,21 @@ export class Session {
           this.status.done = true
           continue
         }
-        // The worker fetches/parses the url and reports back via
-        // onPageIngested — the main thread never touches the raw payload.
+        // The worker fetches/parses the url, or ingests the pushed payload
+        // string, and reports back via onPageIngested — the main thread
+        // never touches the raw JSON either way.
         this.geometry.origin(e.pageIndex, this.pageRect)
-        this.worker.ingestUrl(e.pageIndex, e.url, this.pageRect[0], this.pageRect[1])
+        if (e.payload !== undefined) {
+          // A pushed body: hand the worker the string. Parsing it here would
+          // put a 40KB JSON.parse on the frame thread, per page.
+          void this.worker
+            .ingestJson(e.pageIndex, e.payload, this.pageRect[0], this.pageRect[1])
+            .catch((err) => {
+              if (!this.disposed) console.warn('page ingest failed', e.pageIndex, err)
+            })
+        } else {
+          this.worker.ingestUrl(e.pageIndex, e.url, this.pageRect[0], this.pageRect[1])
+        }
       }
       this.onStatusChange?.()
       this.engine.requestDraw()

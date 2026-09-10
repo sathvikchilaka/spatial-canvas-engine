@@ -1,6 +1,7 @@
 // tests/engine/bucketGrid.test.ts
 import { describe, it, expect } from 'vitest'
 import { BucketGrid } from '@/engine/bucketGrid'
+import type { Rect } from '@/data/nodes'
 
 describe('BucketGrid', () => {
   it('is conservative: never misses an intersecting rect', () => {
@@ -85,5 +86,44 @@ describe('BucketGrid.move', () => {
     g.clearPage(3)
     const out = new Uint32Array(16)
     expect(g.query(4900, 4900, 200, 200, out)).toBe(0)
+  })
+
+  /**
+   * `move` is `remove` then `insert`, each over its own exact footprint — so a
+   * box that straddles several cells and moves to a footprint that only
+   * partially overlaps its old one should end up registered once per cell it
+   * now occupies, nowhere it left, and (this is the load-bearing check) not
+   * double-registered in a cell that was in both footprints. A future "diff
+   * the footprints instead of remove+insert" optimization could silently
+   * regress that last part without this test noticing via the single-box
+   * cases above.
+   */
+  it('handles a multi-cell box moving to a partially overlapping footprint', () => {
+    const g = new BucketGrid(512)
+    // Straddles cells (0,0)/(1,0)/(0,1)/(1,1).
+    const from: Rect = { x: 500, y: 500, w: 40, h: 40 }
+    // Straddles cells (1,0)/(2,0)/(1,1)/(2,1) — shares column 1 with `from`,
+    // gains column 2, loses column 0.
+    const to: Rect = { x: 1000, y: 500, w: 40, h: 40 }
+    g.addPage(0, Uint32Array.of(7), Float32Array.of(from.x, from.y, from.w, from.h), Uint32Array.of(0))
+
+    g.move(0, 0, from, to)
+
+    const out = new Uint32Array(16)
+    // Retained cell (1,0): present exactly once.
+    expect(g.query(520, 510, 10, 10, out)).toBe(1)
+    // Retained cell (1,1): present exactly once.
+    expect(g.query(520, 520, 10, 10, out)).toBe(1)
+    // Gained cell (2,0): present.
+    expect(g.query(1030, 510, 10, 10, out)).toBe(1)
+    // Gained cell (2,1): present.
+    expect(g.query(1030, 520, 10, 10, out)).toBe(1)
+    // Lost cell (0,0): absent.
+    expect(g.query(10, 510, 10, 10, out)).toBe(0)
+    // Lost cell (0,1): absent.
+    expect(g.query(10, 520, 10, 10, out)).toBe(0)
+    // The whole new footprint (and its neighborhood), queried in one shot,
+    // still yields the box exactly once — not once per shared cell.
+    expect(g.query(950, 480, 150, 100, out)).toBe(1)
   })
 })

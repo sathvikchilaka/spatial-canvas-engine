@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { benchPan, benchPick } from "@/app/bench"
 import { ingestReport, markStreamDone, startIngestProbe, stopIngestProbe } from "@/app/ingestProbe"
 import { Session } from "@/app/session"
 import { DocumentPicker, type DocumentId } from "@/components/DocumentPicker"
+import { InspectorPanel } from "@/components/InspectorPanel"
 import { StatusBar } from "@/components/StatusBar"
 import { Toolbar, type ToolName } from "@/components/Toolbar"
 import { TreeView } from "@/components/TreeView"
@@ -36,6 +37,8 @@ export function App() {
     }),
     [],
   )
+  const rectOf = useCallback((id: number) => sessionRef.current?.rectOf(id) ?? null, [])
+  const focusNode = useCallback((id: number) => sessionRef.current?.focusNode(id), [])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -174,13 +177,26 @@ export function App() {
         </div>
       </header>
       <div className="flex min-h-0 flex-1">
-        <TreeView
-          nodes={nodes}
-          version={stream.pagesReceived}
-          onFocus={(id) => sessionRef.current?.focusNode(id)}
-          meta={treeMeta}
-          onRelabel={(id, label) => sessionRef.current?.setLabel(id, label)}
-        />
+        <div className="flex min-h-0 shrink-0 flex-col">
+          <div className="flex min-h-0 flex-1">
+            <TreeView
+              nodes={nodes}
+              version={stream.pagesReceived}
+              onFocus={focusNode}
+              meta={treeMeta}
+              onRelabel={(id, label) => sessionRef.current?.setLabel(id, label)}
+            />
+          </div>
+          <div className="flex min-h-0 flex-1 flex-col border-t border-border">
+            <InspectorPanel
+              nodes={nodes}
+              version={stream.pagesReceived}
+              meta={treeMeta}
+              rectOf={rectOf}
+              onFocus={focusNode}
+            />
+          </div>
+        </div>
         <div className="relative min-h-0 flex-1">
           <canvas ref={canvasRef} className="block h-full w-full touch-none" />
         </div>

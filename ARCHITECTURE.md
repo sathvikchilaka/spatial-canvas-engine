@@ -178,11 +178,27 @@ adjacent bands, so inset extraction geometry yields `M+1` lines rather than `2M`
 Band derivation is structural, not width-based: a cell that spans two bands is told apart from a
 genuinely wide cell by removing its extent and checking whether that reveals an interior gap
 (`splitInterval`), using only a relative epsilon for extraction slop — never a width heuristic.
-`MIN_BAND = 8` is unrelated to this derivation; it is purely the clamp on how far a divider drag
-may shrink a band. `cellRect` re-derives every cell's rect from the current lines on every read,
-which is what makes post-edit bbox recalculation a one-liner with no second bookkeeping copy —
-and, on the session side, is what makes `tableAt` skipping `FLAG_HIDDEN` cells self-healing after
-a commit: the next mesh rebuild simply never sees a merged-away or undone cell.
+Occupancy gaps alone are not enough, because the tool's own output has none: `cellRect` tiles the
+table, so committed cells share exact edges and every extent would fuse into a single band —
+which is precisely how the mesh used to collapse to 1x1 after the first gesture. `bandsOf`
+therefore also splits an interval at its interior **shared edges**, a coordinate that is one
+extent's `hi` and another's `lo` *exactly*. Exactness is what keeps this structural: two cells
+tiled from the same divider line carry byte-identical edges, whereas merely nearby extraction
+edges differ and stay in one band. `MIN_BAND = 8` is unrelated to the whole derivation; it is
+purely the clamp on how far a divider drag may shrink a band.
+
+`cellRect` re-derives every cell's rect from the current lines on every read, which is what makes
+post-edit bbox recalculation a one-liner with no second bookkeeping copy. On the session side, the
+mesh is rebuilt from the render arrays after any store change that moved geometry — a commit, an
+undo, a redo — and because `tableAt` skips `FLAG_HIDDEN` cells, that rebuild never sees a
+merged-away or undone cell. The rebuild is *not* a repair mechanism, though: it is only safe
+because band derivation is a fixed point over `cellRect`'s own gapless output (pinned by tests in
+`tests/tools/tableMesh.test.ts` that feed a mesh's rects straight back into `buildMesh`, and by
+two-consecutive-gesture tests in `tests/tools/tableTool.test.ts`). The rebuild is also skipped
+while a gesture is live: hover and selection writes leave `state.edits` identical, and
+`TableTool.adopt` refuses outright while it is `capturing`, so an in-progress divider drag is
+never replaced by a freshly derived mesh. The diff baseline is written before each `commit()` for
+the same reason — `commit` runs the subscriber, and therefore the re-adopt, synchronously.
 
 Building a mesh is deliberately lossy — it regularises a ragged table onto a shared grid, which
 is the repair the reviewer picked the tool up to make. `TableTool.adopt` therefore takes the

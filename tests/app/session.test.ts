@@ -667,9 +667,31 @@ describe('structural edits', () => {
 
   it('allocates ids monotonically and never reuses one', () => {
     const s = new Session(canvas(), createSyntheticDocument(1, 1))
-    const a = s.allocId()
-    const b = s.allocId()
-    expect(b).toBe(a + 1)
+    const seen = new Set<number>()
+    let prev = -Infinity
+    for (let i = 0; i < 64; i++) {
+      const id = s.allocId()
+      expect(id).toBeGreaterThan(prev)
+      expect(seen.has(id)).toBe(false)
+      // Never collides with a streamed id, whose ceiling is page * ID_STRIDE + n.
+      expect(id).toBeGreaterThanOrEqual(1_000_000_000)
+      expect(indexOfId(s.nodes, id)).toBeLessThan(0)
+      seen.add(id)
+      prev = id
+    }
+    // Undo/redo of a creation must not hand the id back out again.
+    const created = s.allocId()
+    commit('create', (d) => {
+      d.edits[created] = {
+        created: { page: 0, type: NodeType.Cell, parent: -1, order: 0 },
+        rect: { x: 0, y: 0, w: 4, h: 4 },
+      }
+      d.dirtyAt[created] = 1
+    })
+    undo()
+    redo()
+    expect(s.allocId()).toBeGreaterThan(created)
+    expect(seen.has(created)).toBe(false)
     s.dispose()
   })
 })

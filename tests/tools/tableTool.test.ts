@@ -52,9 +52,10 @@ describe('meshEdits', () => {
     for (const c of m0.cells) original.set(c.id, { ...cellRectOf(m0, c.id) })
     const m1 = moveDivider(m0, 'col', 1, 170)
     const diff = meshEdits(m1, original)
-    // Only the two cells adjoining the moved column line changed.
-    expect([...diff.keys()].sort()).toEqual([1, 2, 3, 4].filter((id) => diff.has(id)).sort())
-    expect(diff.size).toBe(4)
+    // Moving the interior column line touches every cell adjoining it on either row.
+    expect([...diff.keys()].sort((a, b) => a - b)).toEqual([1, 2, 3, 4])
+    expect(diff.get(1)).toEqual({ x: 106, y: 206, w: 64, h: 14 })
+    expect(diff.get(2)).toEqual({ x: 170, y: 206, w: 24, h: 14 })
   })
 
   function cellRectOf(m: ReturnType<typeof buildMesh>, id: number) {
@@ -118,9 +119,29 @@ describe('TableTool', () => {
       requestDraw: () => {},
     })
     await tool.adopt(1)
-    tool.onPointerDown({ world: [120, 210], screen: [0, 0], scale: 1, shift: false, alt: false })
+    // (120, 210) sits within 8px slop of row line y=206, which would wrongly
+    // start a drag; (300, 300) is well outside the mesh bounds and every
+    // line's slop, so no divider is hit.
+    tool.onPointerDown({ world: [300, 300], screen: [0, 0], scale: 1, shift: false, alt: false })
     expect(tool.ephemeralRect).toBeNull()
+    expect(tool.capturing).toBe(false)
+    tool.onPointerUp({ world: [300, 300], screen: [0, 0], scale: 1, shift: false, alt: false })
+    expect(Object.keys(useStore.getState().edits)).toHaveLength(0)
+  })
+
+  it('does not start a drag on pointer down near a divider but releases without moving', async () => {
+    const tool = new TableTool({
+      tableAt: () => snapshot(),
+      pick: async () => 1,
+      requestDraw: () => {},
+    })
+    await tool.adopt(1)
+    // Within 8px slop of row line y=206: a drag does start here (unlike the
+    // out-of-bounds case above), but releasing without a move commits nothing.
+    tool.onPointerDown({ world: [120, 210], screen: [0, 0], scale: 1, shift: false, alt: false })
+    expect(tool.capturing).toBe(true)
     tool.onPointerUp({ world: [120, 210], screen: [0, 0], scale: 1, shift: false, alt: false })
+    expect(tool.capturing).toBe(false)
     expect(Object.keys(useStore.getState().edits)).toHaveLength(0)
   })
 

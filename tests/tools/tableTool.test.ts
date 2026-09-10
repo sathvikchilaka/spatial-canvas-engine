@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { buildMesh, moveDivider } from '@/tools/tableMesh'
 import { TableTool, meshEdits, type TableSnapshot } from '@/tools/tableTool'
 import { canUndo, resetHistory, undo, useStore } from '@/store/store'
-import type { Rect } from '@/data/nodes'
+import { NodeType, type Rect } from '@/data/nodes'
 
 const cells = () => {
   const out = []
@@ -205,7 +205,7 @@ describe('TableTool split and merge', () => {
     // are committed: cell 1 keeps the low half, 5000 takes the high half.
     expect(Object.keys(edits)).toEqual(['1', '5000'])
     expect(edits[1].rect).toEqual({ x: 106, y: 206, w: 22, h: 14 })
-    expect(edits[5000].created).toEqual({ page: 0, type: 2, parent: 900, order: 0 })
+    expect(edits[5000].created).toEqual({ page: 0, type: NodeType.Cell, parent: 900, order: 0 })
     expect(edits[5000].rect).toEqual({ x: 128, y: 206, w: 22, h: 14 })
     expect(tool.mesh!.cols).toHaveLength(4)
 
@@ -285,5 +285,120 @@ describe('TableTool split and merge', () => {
     expect(useStore.getState().selectedId).toBe(4)
     tool.onKeyDown(key('m'))
     expect(Object.keys(useStore.getState().edits)).toHaveLength(0)
+  })
+})
+
+/**
+ * A miniature of `Session`: cell geometry lives outside the store, committed
+ * rects are written back into it, and every store change re-adopts the table —
+ * which is what feeds `cellRect`'s gapless output back into `buildMesh`.
+ */
+function harness() {
+  const current = new Map<number, { x: number; y: number; w: number; h: number }>()
+  for (const c of cells()) current.set(c.id, { x: c.x, y: c.y, w: c.w, h: c.h })
+  const tool: TableTool = new TableTool({
+    tableAt: () => ({
+      tableId: 900,
+      cells: [...current].map(([id, r]) => ({ id, ...r })),
+    }),
+    pick: async () => 1,
+    requestDraw: () => {},
+    allocId: () => 5000,
+    nodeMeta: () => ({ page: 0, parent: 900, order: 0 }),
+  })
+  const unsub = useStore.subscribe((state) => {
+    for (const key of Object.keys(state.edits)) {
+      const r = state.edits[Number(key)]?.rect
+      if (r) current.set(Number(key), { ...r })
+    }
+    // Unconditional, exactly like `Session.subscribeSelection` before the
+    // `capturing` guard: `adopt` itself must refuse a re-adopt mid-drag.
+    if (tool.tableId !== null) void tool.adopt(tool.tableId)
+  })
+  return { tool, current, unsub }
+}
+
+const drag = (tool: TableTool, axis: 'row' | 'col', index: number, to: number) => {
+  const mesh = tool.mesh!
+  const line = axis === 'col' ? mesh.cols[index] : mesh.rows[index]
+  const at = (x: number, y: number) => ({
+    world: [x, y] as [number, number],
+    screen: [0, 0] as [number, number],
+    scale: 1,
+    shift: false,
+    alt: false,
+  })
+  if (axis === 'col') {
+    tool.onPointerDown(at(line, mesh.rows[0] + 4))
+    tool.onPointerMove(at(to, mesh.rows[0] + 4))
+    tool.onPointerUp(at(to, mesh.rows[0] + 4))
+  } else {
+    tool.onPointerDown(at(mesh.cols[0] + 4, line))
+    tool.onPointerMove(at(mesh.cols[0] + 4, to))
+    tool.onPointerUp(at(mesh.cols[0] + 4, to))
+  }
+}
+
+describe('TableTool across consecutive gestures', () => {
+  it('still has a grid after the first committed drag', async () => {
+    const { tool, unsub } = harness()
+    await tool.adopt(1)
+    const cols = tool.mesh!.cols.length
+    const rows = tool.mesh!.rows.length
+
+    drag(tool, 'col', 1, 170)
+    await settle()
+
+    expect(tool.mesh!.cols).toHaveLength(cols)
+    expect(tool.mesh!.rows).toHaveLength(rows)
+    // The mesh the reviewer now looks at still separates the four cells.
+    const placed = tool.mesh!.cells.map((c) => `${c.row}:${c.col}`)
+    expect(new Set(placed).size).toBe(4)
+    unsub()
+  })
+
+  it('a second drag moves only the cells adjoining the line it grabbed', async () => {
+    const { tool, current, unsub } = harness()
+    await tool.adopt(1)
+
+    drag(tool, 'col', 1, 170)
+    await settle()
+    drag(tool, 'row', 1, 214)
+    await settle()
+
+    const rects = [1, 2, 3, 4].map((id) => current.get(id)!)
+    // Not every cell collapsed onto the table bounds.
+    const distinct = new Set(rects.map((r) => `${r.x},${r.y},${r.w},${r.h}`))
+    expect(distinct.size).toBe(4)
+    for (const r of rects) {
+      expect(r.w).toBeGreaterThan(0)
+      expect(r.h).toBeGreaterThan(0)
+      expect(r.w).toBeLessThan(tool.mesh!.bounds.w)
+      expect(r.h).toBeLessThan(tool.mesh!.bounds.h)
+    }
+    unsub()
+  })
+
+  it('ignores the re-adopt that a mid-drag hover write triggers', async () => {
+    const { tool, unsub } = harness()
+    await tool.adopt(1)
+    const line = tool.mesh!.cols[1]
+    const at = (x: number) => ({
+      world: [x, 210] as [number, number],
+      screen: [0, 0] as [number, number],
+      scale: 1,
+      shift: false,
+      alt: false,
+    })
+    tool.onPointerDown(at(line))
+    tool.onPointerMove(at(170))
+    // Crossing a cell boundary mid-drag: hover writes to the store, which runs
+    // the subscriber. The in-progress divider must survive it.
+    useStore.setState({ hoveredId: 2 })
+    await settle()
+    expect(tool.mesh!.cols[1]).toBe(170)
+    tool.onPointerUp(at(170))
+    expect(useStore.getState().edits[1]!.rect!.w).toBe(64)
+    unsub()
   })
 })

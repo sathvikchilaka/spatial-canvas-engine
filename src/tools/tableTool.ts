@@ -80,8 +80,17 @@ export class TableTool implements Tool {
     return this.drag !== null
   }
 
-  /** Rebuilds the mesh for whichever table holds `nodeId`. Cheap; not per frame. */
+  /**
+   * Rebuilds the mesh for whichever table holds `nodeId`. Cheap; not per frame.
+   *
+   * A re-adopt is *refused* mid-drag: the caller is the session's store
+   * subscriber, and any store write during a gesture (a hover pick crossing a
+   * cell boundary, most often) would otherwise replace `meshState` with a
+   * freshly derived mesh and throw away the divider the reviewer is holding.
+   * The gesture's own `onPointerUp` commit triggers a re-adopt straight after.
+   */
   async adopt(nodeId: number): Promise<void> {
+    if (this.capturing) return
     const snap = this.deps.tableAt(nodeId)
     this.snapshot = snap
     if (!snap) {
@@ -147,13 +156,16 @@ export class TableTool implements Tool {
     const diff = meshEdits(mesh, this.original)
     if (diff.size === 0) return
     const at = Date.now()
+    // Baseline first: `commit` runs the session subscriber synchronously, which
+    // re-adopts and repopulates `original` from the rebuilt mesh. Writing it
+    // afterwards would leave a mix of rebuilt and committed rects behind.
+    for (const [id, rect] of diff) this.original.set(id, rect)
     commit('tableDivider', (d) => {
       for (const [id, rect] of diff) {
         d.edits[id] = { ...d.edits[id], rect }
         d.dirtyAt[id] = at
       }
     })
-    for (const [id, rect] of diff) this.original.set(id, rect)
     this.deps.requestDraw()
   }
 
@@ -187,6 +199,9 @@ export class TableTool implements Tool {
       this.meshState = next
       const at = Date.now()
       const diff = meshEdits(next, this.original)
+      // Baseline before `commit`, which re-adopts synchronously (see above).
+      for (const [id, r] of diff) this.original.set(id, r)
+      this.original.set(newId, freshRect)
       commit('tableSplit', (d) => {
         for (const [id, r] of diff) {
           if (id === newId) continue
@@ -199,8 +214,6 @@ export class TableTool implements Tool {
         }
         d.dirtyAt[newId] = at
       })
-      for (const [id, r] of diff) this.original.set(id, r)
-      this.original.set(newId, freshRect)
       this.deps.requestDraw()
       return
     }
@@ -212,6 +225,9 @@ export class TableTool implements Tool {
       this.meshState = next
       const at = Date.now()
       const diff = meshEdits(next, this.original)
+      // Baseline before `commit`, which re-adopts synchronously (see above).
+      for (const [id, r] of diff) this.original.set(id, r)
+      this.original.delete(gone)
       commit('tableMerge', (d) => {
         for (const [id, r] of diff) {
           d.edits[id] = { ...d.edits[id], rect: r }
@@ -220,8 +236,6 @@ export class TableTool implements Tool {
         d.edits[gone] = { ...d.edits[gone], deleted: true }
         d.dirtyAt[gone] = at
       })
-      for (const [id, r] of diff) this.original.set(id, r)
-      this.original.delete(gone)
       this.mergePartner = null
       this.deps.requestDraw()
     }

@@ -5,7 +5,7 @@ import { BucketGrid } from '@/engine/bucketGrid'
 import { CanvasEngine } from '@/engine/engine'
 import { attachInput } from '@/engine/input'
 import { screenToWorld } from '@/engine/viewport'
-import { redo, undo, useStore, type Edit } from '@/store/store'
+import { redo, undo, useStore, type AppState, type Edit } from '@/store/store'
 import { toolHandlers } from '@/tools/adapter'
 import { OrderTool } from '@/tools/orderTool'
 import { SelectTool } from '@/tools/selectTool'
@@ -263,9 +263,11 @@ export class Session {
    * The table containing `nodeId`: either the node is a `Cell` (its parent is
    * the table block) or it is the block itself. Tables are not a node type —
    * they are a parent whose children are cells — so detection is a parent/child
-   * scan, not a flag lookup. O(document), but it runs on tool adoption (one
-   * click), never per frame; index children by parent id at ingest only if a
-   * profile shows FUNSD's 41k nodes making it matter.
+   * scan, not a flag lookup. O(document), but it only runs on tool adoption and
+   * on a store change that actually moved geometry (a commit, an undo/redo) —
+   * never per frame, and never on a hover or selection write. Index children by
+   * parent id at ingest only if a profile shows FUNSD's 41k nodes making it
+   * matter.
    */
   tableAt(nodeId: number): TableSnapshot | null {
     const i = indexOfId(this.nodes, nodeId)
@@ -423,6 +425,7 @@ export class Session {
   /** Mirrors store selection/dirty state into the render flags. */
   private subscribeSelection(): () => void {
     let prevSelected = -1
+    let prevEdits: AppState['edits'] | null = null
     return useStore.subscribe((state) => {
       if (prevSelected >= 0) this.nodes.flags[prevSelected] &= ~FLAG_SELECTED
       const i = state.selectedId === null ? -1 : indexOfId(this.nodes, state.selectedId)
@@ -440,7 +443,20 @@ export class Session {
       // the render arrays so the drawn dividers cannot lie about the boxes.
       // `adopt` only reads `this.nodes` and requests a draw, so it cannot loop
       // back through the store.
-      if (this.toolName === 'table' && this.tableTool.tableId !== null) {
+      //
+      // Only when the geometry actually moved: `state.edits` keeps its identity
+      // across a hover or selection write (Immer only replaces what a recipe
+      // touches), and `tableAt` is O(document) plus a `buildMesh`, which must
+      // not run at pointer-move rate. And never mid-gesture — `adopt` refuses
+      // that itself, this is just the cheaper path to the same answer.
+      const editsChanged = state.edits !== prevEdits
+      prevEdits = state.edits
+      if (
+        editsChanged &&
+        this.toolName === 'table' &&
+        this.tableTool.tableId !== null &&
+        !this.tableTool.capturing
+      ) {
         void this.tableTool.adopt(this.tableTool.tableId)
       }
       this.orderDirty = true

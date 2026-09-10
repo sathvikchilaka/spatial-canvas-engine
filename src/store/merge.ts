@@ -3,9 +3,9 @@ import { applyStream, useStore } from './store'
 export type MergeResult = { applied: number; shielded: number }
 
 /**
- * Dirty-node shielding: a node the human has touched rejects stream overwrites;
- * clean nodes take them. Applied without recording history — Cmd+Z must never
- * rewind the model's output.
+ * Geometry shielding: a node whose rect a human has overridden rejects stream
+ * overwrites; every other node takes them. Applied without recording history —
+ * Cmd+Z must never rewind the model's output.
  *
  * `edits` is the *human* overlay only. A clean node's stream rect is not
  * mirrored into it — that value is already the base geometry in the render
@@ -23,14 +23,18 @@ export function applyPageUpdate(
   coords: Float32Array,
 ): MergeResult {
   void pageIndex
-  const dirty = useStore.getState().dirtyAt
+  // The shield protects *geometry*, so it keys on the human rect override, not
+  // on `dirtyAt`. `dirtyAt` also marks link edits (OrderTool) and is what
+  // paints FLAG_DIRTY; using it here froze a box's coordinates because its
+  // reading order had been repaired.
+  const edits = useStore.getState().edits
   let applied = 0
   let shielded = 0
 
   applyStream((d) => {
     for (let i = 0; i < ids.length; i++) {
       const id = ids[i]
-      if (dirty[id] !== undefined) {
+      if (edits[id]?.rect !== undefined) {
         shielded++
         continue
       }

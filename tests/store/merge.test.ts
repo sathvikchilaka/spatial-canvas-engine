@@ -51,11 +51,12 @@ describe('applyPageUpdate', () => {
   })
 
   it('does not add to the undo stack', () => {
-    // A node carrying a human edit that is no longer dirty: the stream is free
-    // to overwrite it, and that write must still not be undoable.
-    commit('move', (d) => { d.edits[1] = { rect: { x: 999, y: 0, w: 10, h: 10 } } })
+    // A node with a dirty flag but no rect override (e.g. a reading-order
+    // link edit): the shield now keys on the rect override, so the stream is
+    // free to overwrite geometry, and that write must still not be undoable.
+    commit('move', (d) => { d.dirtyAt[1] = Date.now() })
     applyPageUpdate(0, ...page({ id: 1, x: 50 }))
-    expect(useStore.getState().edits[1]?.rect?.x).toBe(50)
+    expect(useStore.getState().edits[1]).toBeUndefined()
     // Only the human's commit is on the stack — the stream write recorded
     // nothing, so one undo empties it.
     undo()
@@ -78,5 +79,39 @@ describe('applyPageUpdate', () => {
     const a = JSON.stringify(useStore.getState().edits)
     applyPageUpdate(0, ...page({ id: 1, x: 50 }))
     expect(JSON.stringify(useStore.getState().edits)).toBe(a)
+  })
+})
+
+describe('shield predicate', () => {
+  /**
+   * `OrderTool` stamps dirtyAt when a human links two boxes. Keying the
+   * geometry shield on dirtyAt therefore froze a box's *geometry* because its
+   * reading order was edited — two unrelated repairs sharing one flag.
+   */
+  it('does not shield a node whose only edit is a reading-order link', () => {
+    useStore.setState(
+      { edits: {}, dirtyAt: { 1: Date.now() }, selectedId: null, hoveredId: null, edgesAdded: [[1, 2]], edgesRemoved: [] },
+      true,
+    )
+    const r = applyPageUpdate(0, Uint32Array.of(1), Float32Array.of(5, 5, 5, 5))
+    expect(r.shielded).toBe(0)
+    expect(r.applied).toBe(1)
+  })
+
+  it('still shields a node whose geometry a human edited', () => {
+    useStore.setState(
+      {
+        edits: { 1: { rect: { x: 1, y: 2, w: 3, h: 4 } } },
+        dirtyAt: { 1: Date.now() },
+        selectedId: null,
+        hoveredId: null,
+        edgesAdded: [],
+        edgesRemoved: [],
+      },
+      true,
+    )
+    const r = applyPageUpdate(0, Uint32Array.of(1), Float32Array.of(9, 9, 9, 9))
+    expect(r.shielded).toBe(1)
+    expect(useStore.getState().edits[1].rect).toEqual({ x: 1, y: 2, w: 3, h: 4 })
   })
 })

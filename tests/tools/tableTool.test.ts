@@ -289,12 +289,64 @@ describe('TableTool split and merge', () => {
 })
 
 /**
+ * Cell geometry backed by a `Float32Array`, laid out exactly like
+ * `nodes.coords` (`i*4` = x, y, w, h). `Session.writeCoords` assigns `to.x`
+ * and `to.w` into separate `Float32Array` slots — it never stores the right
+ * edge itself — so a cell's right edge, read back, is
+ * `fl32(x) + fl32(w)` computed in float64, which is not always bit-identical
+ * to the neighbouring cell's own `fl32(x)`. A plain `Map<number, Rect>` model
+ * (float64 all the way through) cannot reproduce that; this class is the
+ * fixed-point tests' float32 round-trip.
+ */
+class Float32Coords {
+  private slot = new Map<number, number>()
+  private coords = new Float32Array(0)
+  private count = 0
+
+  private ensure(id: number): number {
+    let i = this.slot.get(id)
+    if (i !== undefined) return i
+    i = this.count++
+    this.slot.set(id, i)
+    if ((i + 1) * 4 > this.coords.length) {
+      const grown = new Float32Array(Math.max(this.coords.length * 2, (i + 1) * 4))
+      grown.set(this.coords)
+      this.coords = grown
+    }
+    return i
+  }
+
+  set(id: number, r: { x: number; y: number; w: number; h: number }): void {
+    const i = this.ensure(id) * 4
+    this.coords[i] = r.x
+    this.coords[i + 1] = r.y
+    this.coords[i + 2] = r.w
+    this.coords[i + 3] = r.h
+  }
+
+  get(id: number): { x: number; y: number; w: number; h: number } | undefined {
+    const i = this.slot.get(id)
+    if (i === undefined) return undefined
+    const c = i * 4
+    return { x: this.coords[c], y: this.coords[c + 1], w: this.coords[c + 2], h: this.coords[c + 3] }
+  }
+
+  [Symbol.iterator](): IterableIterator<[number, { x: number; y: number; w: number; h: number }]> {
+    const entries: [number, { x: number; y: number; w: number; h: number }][] = []
+    for (const id of this.slot.keys()) entries.push([id, this.get(id)!])
+    return entries[Symbol.iterator]()
+  }
+}
+
+/**
  * A miniature of `Session`: cell geometry lives outside the store, committed
  * rects are written back into it, and every store change re-adopts the table —
- * which is what feeds `cellRect`'s gapless output back into `buildMesh`.
+ * which is what feeds `cellRect`'s gapless output back into `buildMesh`. The
+ * geometry store is `Float32Coords`, not a float64 `Map`, matching
+ * `nodes.coords` — see NEW-1's test mandate.
  */
 function harness() {
-  const current = new Map<number, { x: number; y: number; w: number; h: number }>()
+  const current = new Float32Coords()
   for (const c of cells()) current.set(c.id, { x: c.x, y: c.y, w: c.w, h: c.h })
   const tool: TableTool = new TableTool({
     tableAt: () => ({
@@ -354,6 +406,31 @@ describe('TableTool across consecutive gestures', () => {
     // The mesh the reviewer now looks at still separates the four cells.
     const placed = tool.mesh!.cells.map((c) => `${c.row}:${c.col}`)
     expect(new Set(placed).size).toBe(4)
+    unsub()
+  })
+
+  it('survives a fractional divider position round-tripped through float32 (NEW-1)', async () => {
+    // A fractional world coordinate: `fl32(x) + fl32(w)` computed in float64
+    // is not guaranteed to equal the neighbouring cell's own `fl32(x)` — the
+    // exact-equality cut this regression test pins would silently drop this
+    // column line on most runs.
+    const to = 135.67867062040952
+    const { tool, current, unsub } = harness()
+    await tool.adopt(1)
+    const cols = tool.mesh!.cols.length
+    const rows = tool.mesh!.rows.length
+
+    drag(tool, 'col', 1, to)
+    await settle()
+
+    expect(tool.mesh!.cols).toHaveLength(cols)
+    expect(tool.mesh!.rows).toHaveLength(rows)
+    expect(tool.mesh!.cols[1]).toBeCloseTo(to, 3)
+    // All four cells stay distinct — none collapsed onto its neighbour.
+    const placed = tool.mesh!.cells.map((c) => `${c.row}:${c.col}`)
+    expect(new Set(placed).size).toBe(4)
+    const rects = [1, 2, 3, 4].map((id) => current.get(id)!)
+    expect(new Set(rects.map((r) => `${r.x},${r.y},${r.w},${r.h}`)).size).toBe(4)
     unsub()
   })
 

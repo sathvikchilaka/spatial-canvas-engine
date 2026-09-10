@@ -33,12 +33,20 @@ export type CellInput = {
 /**
  * Smallest band a divider drag may leave behind, world units.
  *
- * This is a *drag constraint* only. Band derivation below is tolerance-free — it
- * uses occupancy gaps and exactly-shared rect edges, never a misalignment
- * threshold — so tuning this constant can never silently change how a mesh is
- * derived.
+ * This is a *drag constraint* only, unrelated to `EDGE_ULP` below: it clamps
+ * how close together a human may drag two dividers, while `EDGE_ULP` only
+ * recognises that two float32 reads of what is meant to be the same divider
+ * line are the same line. `EDGE_ULP` is many orders of magnitude smaller than
+ * `MIN_BAND`, so tuning this constant can never change how a mesh is derived.
  */
 export const MIN_BAND = 8
+
+/**
+ * Largest relative rounding error a float32 round-trip can introduce (2^-23).
+ * `EDGE_ULP` below scales this to the coordinate's own magnitude so it tracks
+ * float32 precision at any world position rather than a fixed absolute slop.
+ */
+const FLOAT32_EPS = 1.1920929e-7
 
 type Band = { lo: number; hi: number }
 type Extent = { lo: number; hi: number }
@@ -102,16 +110,35 @@ function splitInterval(interval: Band, extents: Extent[]): Band[] {
 }
 
 /**
+ * Coordinate-scaled tolerance for "is this the same divider line". The store
+ * (`nodes.coords`) is a `Float32Array` holding `x`/`w`, not the two edges
+ * themselves, so `Session.tableAt` hands `buildMesh` a right edge computed as
+ * `fl32(x0) + fl32(x1 - x0)` while the neighbouring cell's left edge is read
+ * directly as `fl32(x1)` — two different float64 sums of float32 inputs, not
+ * guaranteed bit-identical even though both round-trip the same divider line.
+ * `EDGE_ULP` bounds how far apart those two computations of the same line can
+ * land, scaled to the coordinate's own magnitude (float32 precision is
+ * relative, not absolute) with headroom for the extra rounding step, plus a
+ * floor for coordinates near zero. It is ~1e4x smaller than `MIN_BAND`, so a
+ * divider genuinely dragged to a nearby-but-distinct position is never
+ * swallowed by it.
+ */
+function edgeUlp(c: number): number {
+  return Math.max(Math.abs(c) * FLOAT32_EPS * 8, 1e-4)
+}
+
+/**
  * Splits an interval at its interior *shared edges*: a coordinate that is
- * simultaneously some extent's `hi` and another extent's `lo`. A gapless table
- * — which is exactly what `cellRect` produces, and therefore what the rebuild
- * after every commit feeds back in — has no occupancy gaps at all, so without
- * this the whole table fuses into one band and the mesh collapses to 1x1 after
- * the first gesture. Equality here is exact: two cells tiled from the same
- * divider line carry byte-identical edge coordinates (the same value, through
- * the same `Float32Array` rounding), while merely *nearby* extraction edges
- * differ and stay in one band. So this is a structural test, not a tolerance —
- * `MIN_BAND` remains the divider-drag clamp and nothing else.
+ * simultaneously some extent's `hi` and another extent's `lo`, within
+ * `edgeUlp`. A gapless table — which is what `cellRect`'s output, read back
+ * through `nodes.coords`, produces, and therefore what the rebuild after
+ * every commit feeds back in — has no occupancy gaps at all, so without this
+ * the whole table fuses into one band and the mesh collapses to 1x1 after the
+ * first gesture. The tolerance is deliberately tiny and scoped to this one
+ * float32-round-trip question — it can shift where a cut lands by at most an
+ * `edgeUlp`, never merge two bands that are genuinely apart — so this stays a
+ * structural test, not a general misalignment threshold; `MIN_BAND` remains
+ * the divider-drag clamp and nothing else.
  */
 function splitAtSharedEdges(interval: Band, extents: Extent[]): Band[] {
   const inside = extents.filter((e) => e.lo < interval.hi && e.hi > interval.lo)
@@ -121,8 +148,9 @@ function splitAtSharedEdges(interval: Band, extents: Extent[]): Band[] {
   for (const a of inside) {
     const c = a.hi
     if (c <= interval.lo || c >= interval.hi) continue
-    if (cuts.includes(c)) continue
-    if (inside.some((b) => b.lo === c)) cuts.push(c)
+    const tol = edgeUlp(c)
+    if (cuts.some((x) => Math.abs(x - c) <= tol)) continue
+    if (inside.some((b) => Math.abs(b.lo - c) <= tol)) cuts.push(c)
   }
   if (cuts.length === 0) return [interval]
 

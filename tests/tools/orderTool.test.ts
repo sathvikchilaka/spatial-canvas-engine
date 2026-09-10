@@ -1,6 +1,6 @@
 // tests/tools/orderTool.test.ts
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { arrowPath, OrderTool } from '@/tools/orderTool'
+import { arrowPath, hitEndpoint, OrderTool, type ArrowRecord } from '@/tools/orderTool'
 import { undo, redo, useStore } from '@/store/store'
 import { appendEdges, createEdgeSet, hasEdge, materialize } from '@/data/edges'
 import { createNodeArrays, indexOfId, pushNode, NodeType } from '@/data/nodes'
@@ -160,5 +160,49 @@ describe('OrderTool capturing / reset (NEW-2)', () => {
     tool.onPointerMove({ world: [99, 99] } as never)
     expect(tool.linking).toBeNull()
     expect(deps.requestDraw).not.toHaveBeenCalled()
+  })
+})
+
+const arrows: ArrowRecord[] = [
+  { from: 1, to: 2, x1: 0, y1: 0, x2: 100, y2: 0 },
+  { from: 3, to: 4, x1: 0, y1: 50, x2: 100, y2: 50 },
+]
+
+describe('hitEndpoint', () => {
+  it('finds the head of an arrow', () => {
+    expect(hitEndpoint(arrows, 2, 101, 1, 5)).toEqual({ from: 1, to: 2, end: 'head' })
+  })
+
+  it('finds the tail of an arrow', () => {
+    expect(hitEndpoint(arrows, 2, 1, 51, 5)).toEqual({ from: 3, to: 4, end: 'tail' })
+  })
+
+  it('misses the middle of the segment', () => {
+    expect(hitEndpoint(arrows, 2, 50, 0, 5)).toBeNull()
+  })
+
+  it('misses outside the slop', () => {
+    expect(hitEndpoint(arrows, 2, 120, 0, 5)).toBeNull()
+  })
+
+  it('prefers the nearest endpoint when two are in range', () => {
+    const close: ArrowRecord[] = [
+      { from: 1, to: 2, x1: 0, y1: 0, x2: 10, y2: 0 },
+      { from: 5, to: 6, x1: 12, y1: 0, x2: 40, y2: 0 },
+    ]
+    expect(hitEndpoint(close, 2, 11, 0, 5)).toEqual({ from: 1, to: 2, end: 'head' })
+    expect(hitEndpoint(close, 2, 12.5, 0, 5)).toEqual({ from: 5, to: 6, end: 'tail' })
+  })
+
+  it('respects `count` and ignores stale trailing records', () => {
+    expect(hitEndpoint(arrows, 1, 1, 51, 5)).toBeNull()
+  })
+
+  it('prefers a head over a tail at exactly equal distance', () => {
+    const tie: ArrowRecord[] = [
+      { from: 1, to: 2, x1: 0, y1: 0, x2: 10, y2: 0 },
+      { from: 5, to: 6, x1: 20, y1: 0, x2: 40, y2: 0 },
+    ]
+    expect(hitEndpoint(tie, 2, 15, 0, 6)).toEqual({ from: 1, to: 2, end: 'head' })
   })
 })

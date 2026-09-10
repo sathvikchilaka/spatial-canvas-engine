@@ -1,5 +1,5 @@
 import type { NodeArrays, Rect } from '@/data/nodes'
-import { arrowPath } from '@/tools/orderTool'
+import { arrowPath, type ArrowRecord } from '@/tools/orderTool'
 import { createEdgeSet, type EdgeSet } from '@/data/edges'
 
 const MAX_ARROWS = 300
@@ -17,6 +17,20 @@ export class OrderOverlay {
   private readonly rectB: Rect = { x: 0, y: 0, w: 0, h: 0 }
   private edges: EdgeSet = createEdgeSet()
 
+  /**
+   * The arrows this overlay painted last frame, so the order tool can hit-test
+   * endpoints without re-deriving them. Pre-allocated to the arrow budget and
+   * overwritten in place — the draw loop allocates nothing.
+   */
+  readonly arrows: ArrowRecord[] = Array.from({ length: MAX_ARROWS }, () => ({
+    from: 0, to: 0, x1: 0, y1: 0, x2: 0, y2: 0,
+  }))
+  private painted = 0
+
+  get arrowCount(): number {
+    return this.painted
+  }
+
   setGraph(edges: EdgeSet): void {
     this.edges = edges
   }
@@ -30,6 +44,7 @@ export class OrderOverlay {
     selectedIndex: number,
     indexOfId: (id: number) => number,
   ): void {
+    this.painted = 0
     if (this.edges.count === 0) return
     const budget = visibleCount > MAX_ARROWS && selectedIndex >= 0 ? 2 : MAX_ARROWS
     ctx.save()
@@ -61,6 +76,14 @@ export class OrderOverlay {
         ctx.lineTo(p.x2 - h * Math.cos(p.headAngle + 0.4), p.y2 - h * Math.sin(p.headAngle + 0.4))
         ctx.closePath()
         ctx.fill()
+        const rec = this.arrows[drawn]
+        rec.from = nodes.ids[ia]
+        rec.to = targets[t]
+        rec.x1 = p.x1
+        rec.y1 = p.y1
+        rec.x2 = p.x2
+        rec.y2 = p.y2
+        this.painted = drawn + 1
         drawn++
       }
     }

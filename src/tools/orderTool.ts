@@ -29,6 +29,46 @@ export function arrowPath(a: Rect, b: Rect): Arrow {
   return { x1, y1, x2, y2, headAngle: Math.atan2(dy, dx) }
 }
 
+export type EdgeEndpoint = { from: number; to: number; end: 'head' | 'tail' }
+
+/** One arrow the overlay actually painted, in world coords. */
+export type ArrowRecord = { from: number; to: number; x1: number; y1: number; x2: number; y2: number }
+
+/**
+ * Which arrow endpoint a world point grabs. Only the arrows the overlay drew
+ * last frame are candidates — the graph has tens of thousands of edges, but the
+ * reviewer can only grab one that is on screen, so hit-testing the painted set
+ * is both correct and O(visible arrows).
+ *
+ * `slopWorld` is screen slop / scale, so the grab target is constant in screen
+ * px at any zoom. Heads win a tie: re-pointing a successor is the frequent
+ * gesture, re-pointing a predecessor the rare one.
+ */
+export function hitEndpoint(
+  arrows: readonly ArrowRecord[],
+  count: number,
+  wx: number,
+  wy: number,
+  slopWorld: number,
+): EdgeEndpoint | null {
+  let best: EdgeEndpoint | null = null
+  let bestD = slopWorld
+  for (let i = 0; i < count; i++) {
+    const a = arrows[i]
+    const dh = Math.hypot(wx - a.x2, wy - a.y2)
+    if (dh <= bestD) {
+      bestD = dh
+      best = { from: a.from, to: a.to, end: 'head' }
+    }
+    const dt = Math.hypot(wx - a.x1, wy - a.y1)
+    if (dt < bestD) {
+      bestD = dt
+      best = { from: a.from, to: a.to, end: 'tail' }
+    }
+  }
+  return best
+}
+
 export type OrderToolDeps = {
   getRect(id: number): Rect | null
   pick(wx: number, wy: number): Promise<number | null>

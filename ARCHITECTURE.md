@@ -105,7 +105,12 @@ Unchanged QuadTree (`src/worker/quadtree.ts`), now fed uniformly from the worker
 of either document rather than from a caller-supplied node list. `ingest()` inserts every parsed
 node (`tree.insert(id, x, y, w, h)`) as pages stream in — incremental, never a bulk rebuild.
 `hitTest(x, y)` queries the tree, then breaks ties by smallest area / latest reading order among
-overlapping hits. `queryRect` answers viewport-range culling. `updateNode` calls `tree.update(...)` so a box edit moves its entry without touching the rest of the index — and it is driven from `Session.writeCoords`, the single writer for `nodes.coords`, not from the tool that started the gesture. That is what makes undo and redo resync the index: an edit vanishing is as much a geometry change as one appearing. `BucketGrid.move` is called from the same place, so the per-frame cull and the hit-test index can never disagree about where a box is. Both `hitTest` and
+overlapping hits. `queryRect` answers viewport-range culling. `updateNode` calls `tree.update(...)`
+so a box edit moves its entry without touching the rest of the index. It is driven from
+`Session.writeCoords`, the single writer for `nodes.coords`, not from the tool that started the
+gesture — that is what makes undo and redo resync the index, since an edit vanishing is as much a
+geometry change as one appearing. `BucketGrid.move` is called from the same place, so the
+per-frame cull and the hit-test index can never disagree about where a box is. Both `hitTest` and
 `queryRect` round-trip over `postMessage` — `docs/perf/README.md`'s `__pick()` bench reports the
 worker round-trip and the full end-to-end (pointerdown → store selection) numbers separately.
 
@@ -119,9 +124,12 @@ Zustand store (`src/store/store.ts`) plus Immer:
 - `applyStream(recipe)` — SSE/worker writes go through a plain `produce`, **bypassing history
   entirely**, so Cmd+Z can never rewind the model's own output. ("SSE" throughout §4 means the
   SSE-shaped replay described in §2, not a live `EventSource`.)
-- **Merge/conflict rule** (`src/store/merge.ts`, `applyPageUpdate`): a `dirtyAt` timestamp per
-  node is the "dirty shield" — a node the human has edited rejects further stream overwrites
-  (`shielded++`), a clean node accepts them (`applied++`). The shield keys on `edits[id].rect` — a *geometry* override — not on `dirtyAt`. `dirtyAt` marks "a human touched this node" for the FLAG_DIRTY paint and the status bar's counter, and a reading-order link sets it too; keying the geometry shield on it froze a box's coordinates because its reading order had been repaired. This is deliberately taken over the
+- **Merge/conflict rule** (`src/store/merge.ts`, `applyPageUpdate`): the "dirty shield" is keyed
+  on `edits[id].rect` — a per-node *geometry override* — not on `dirtyAt`; a node with a geometry
+  override rejects further stream overwrites (`shielded++`), a clean node accepts them
+  (`applied++`). `dirtyAt` marks "a human touched this node" for the FLAG_DIRTY paint and the
+  status bar's counter, and a reading-order link sets it too; keying the geometry shield on it
+  froze a box's coordinates because its reading order had been repaired. This is deliberately taken over the
   worker's typed arrays directly (`ids: Uint32Array`, `coords: Float32Array`) rather than a
   `SerializedNode[]`, because building that array just to iterate it once would itself be a
   main-thread allocation storm on a FUNSD-sized burst.

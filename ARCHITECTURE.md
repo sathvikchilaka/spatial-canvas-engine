@@ -336,11 +336,13 @@ design gap.
 - The envelope is bespoke rather than a standard (`event:` names, `id:` for resume), and the dev
   server has no resume support — a reconnect restarts the shuffle from page 0. Rather than a
   server-side replay/merge, the client handles this with a skip strategy: `Session` tracks which
-  page indices it has already ingested and drops a page it sees again, so a mid-feed reconnect
-  cannot duplicate nodes, but it also cannot recover a page that failed before the reconnect any
-  faster than the replay reaching it again. A real resume (`Last-Event-ID`, server-side merge)
-  would need the server to remember what each client received; the replay's determinism covers the
-  demo's needs without it.
+  page indices it has already ingested and, on seeing one again, skips re-adding its nodes/edges
+  (no duplication) but still runs the redelivered coordinates through the dirty shield
+  (`applyPageUpdate`), so a human edit made before the reconnect is still protected rather than
+  silently overwritten. It also cannot recover a page that failed before the reconnect any faster
+  than the replay reaching it again. A real resume (`Last-Event-ID`, server-side merge) would need
+  the server to remember what each client received; the replay's determinism covers the demo's
+  needs without it.
 - Sequence numbers are a DFS pre-order over a graph that is not required to be a tree. For a
   FUNSD question with three answers the numbering is one valid reading, not the only one; the
   brief asks the flow to be visible and editable, not to be linearised canonically.

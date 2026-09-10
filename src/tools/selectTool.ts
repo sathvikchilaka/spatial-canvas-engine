@@ -119,8 +119,6 @@ export type SelectToolDeps = {
   /** Candidate rects near a world rect, written into `out`; returns the count. */
   nearby(rect: Rect, pad: number, out: Float32Array, excludeId: number): number
   requestDraw(): void
-  /** Committed geometry change, so the worker's index stays correct. */
-  onCommit?(id: number, from: Rect, to: Rect): void
 }
 
 type Phase = 'idle' | 'dragging'
@@ -205,7 +203,6 @@ export class SelectTool implements Tool {
         d.edits[id] = { ...d.edits[id], rect: to }
         d.dirtyAt[id] = Date.now()
       })
-      this.deps.onCommit?.(id, from, to)
     }
     endCoalesce()
     this.phase = 'idle'

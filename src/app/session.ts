@@ -44,7 +44,6 @@ export class Session {
   private orderDirty = true
   private baseEdges: EdgeSet = createEdgeSet()
   private effectiveEdges: EdgeSet = createEdgeSet()
-  private readonly rectScratch = new Float32Array(4)
   private readonly pageRect = new Float32Array(4)
   /**
    * The stream's geometry per node, parallel to `nodes.coords` (x/y/w/h at
@@ -97,12 +96,6 @@ export class Session {
       pick: (x, y) => this.worker.hitTest(x, y),
       nearby: (rect, pad, out, excludeId) => this.nearby(rect, pad, out, excludeId),
       requestDraw: () => this.engine.requestDraw(),
-      // A commit landing after dispose rejects with "worker disposed" — that is
-      // teardown, not a failure, and must not surface as an unhandled rejection.
-      onCommit: (id, from, to) =>
-        void this.worker.updateNode(id, from, to).catch((err) => {
-          if (!this.disposed) throw err
-        }),
     })
     this.orderTool = new OrderTool({
       getRect: (id) => this.rectOf(id),
@@ -378,22 +371,18 @@ export class Session {
   /**
    * Committed edits win over the extracted geometry in the render arrays — and,
    * just as importantly, an edit that *disappears* (undo, or a redo rewound
-   * past it) puts the stream geometry back. Both loops are O(human edits): the
-   * store no longer mirrors clean nodes, and `overridden` remembers exactly
-   * which nodes were overwritten so nothing has to re-walk the document.
+   * past it) puts the stream geometry back. Both loops are O(human edits), and
+   * both write through `writeCoords`, which is what keeps the worker's index
+   * and the cull grid in step with whatever the history says is true.
    */
   private applyEdits(edits: Record<number, { rect?: Rect }>) {
     for (const key of Object.keys(edits)) {
-      const rect = edits[Number(key)]?.rect
-      if (!rect) continue
       const id = Number(key)
+      const rect = edits[id]?.rect
+      if (!rect) continue
       const i = indexOfId(this.nodes, id)
       if (i < 0) continue
-      const c = i * 4
-      this.nodes.coords[c] = rect.x
-      this.nodes.coords[c + 1] = rect.y
-      this.nodes.coords[c + 2] = rect.w
-      this.nodes.coords[c + 3] = rect.h
+      this.writeCoords(id, i, rect)
       this.overridden.add(id)
     }
     if (this.overridden.size === 0) return
@@ -403,12 +392,47 @@ export class Session {
       const i = indexOfId(this.nodes, id)
       if (i < 0) continue
       const c = i * 4
-      this.nodes.coords[c] = this.baseCoords[c]
-      this.nodes.coords[c + 1] = this.baseCoords[c + 1]
-      this.nodes.coords[c + 2] = this.baseCoords[c + 2]
-      this.nodes.coords[c + 3] = this.baseCoords[c + 3]
+      this.writeCoords(id, i, {
+        x: this.baseCoords[c],
+        y: this.baseCoords[c + 1],
+        w: this.baseCoords[c + 2],
+        h: this.baseCoords[c + 3],
+      })
     }
-    void this.rectScratch
+  }
+
+  /**
+   * The single writer for `nodes.coords` after ingest. The value it overwrites
+   * is, by construction, the rect the worker's QuadTree was last told about, so
+   * the index update is derived here rather than trusted to the call site.
+   * Wiring the sync to the tool's commit instead (as this used to) left the
+   * index holding the edited rect forever after an undo: clicks then missed the
+   * box and hit dead space, which is the "< 2ms click-to-selection" requirement
+   * failing on correctness rather than on speed.
+   */
+  private writeCoords(id: number, i: number, to: Rect): void {
+    const c = i * 4
+    const fx = this.nodes.coords[c]
+    const fy = this.nodes.coords[c + 1]
+    const fw = this.nodes.coords[c + 2]
+    const fh = this.nodes.coords[c + 3]
+    if (fx === to.x && fy === to.y && fw === to.w && fh === to.h) return
+    this.nodes.coords[c] = to.x
+    this.nodes.coords[c + 1] = to.y
+    this.nodes.coords[c + 2] = to.w
+    this.nodes.coords[c + 3] = to.h
+    this.syncIndex(id, { x: fx, y: fy, w: fw, h: fh }, to)
+  }
+
+  /**
+   * Fire-and-forget: nothing waits on the index update, but a rejection after
+   * dispose is teardown, not a failure, and must not surface as an unhandled
+   * rejection on a document switch.
+   */
+  private syncIndex(id: number, from: Rect, to: Rect): void {
+    void this.worker.updateNode(id, from, to).catch((err) => {
+      if (!this.disposed) throw err
+    })
   }
 
   dispose(): void {

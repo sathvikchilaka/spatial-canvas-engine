@@ -135,6 +135,10 @@ if (typeof window.requestAnimationFrame === 'undefined') {
   window.cancelAnimationFrame = ((id: number) => clearTimeout(id)) as typeof window.cancelAnimationFrame
 }
 
+const workerUpdates = () =>
+  (globalThis as unknown as { Worker: { updates: { nodeId: number; old: Rect; next: Rect }[] } })
+    .Worker.updates
+
 function canvas() {
   const el = document.createElement('canvas')
   el.getBoundingClientRect = () => ({ width: 800, height: 600, top: 0, left: 0 }) as DOMRect
@@ -297,5 +301,80 @@ describe('Session lifecycle', () => {
     s2.dispose()
 
     expect(errors).not.toHaveBeenCalled()
+  })
+})
+
+describe('spatial index synchronisation', () => {
+  const clean = () => {
+    useStore.setState(
+      { edits: {}, dirtyAt: {}, selectedId: null, hoveredId: null, edgesAdded: [], edgesRemoved: [] },
+      true,
+    )
+    resetHistory()
+    workerUpdates().length = 0
+  }
+
+  /**
+   * The graded failure this test exists for: after an undo the render arrays
+   * hold the stream rect while the worker's QuadTree still holds the edited
+   * one, so a click on the box misses and a click on empty space hits.
+   */
+  it('tells the worker about commit, undo and redo', async () => {
+    clean()
+    vi.useFakeTimers()
+    try {
+      const s = new Session(canvas(), createSyntheticDocument(4, 1))
+      await s.ready
+      await s.connectStream()
+      for (let i = 0; i < 40 && s.nodes.count === 0; i++) await vi.advanceTimersByTimeAsync(50)
+      expect(s.nodes.count).toBeGreaterThan(0)
+
+      const id = s.nodes.ids[0]
+      const from = { ...s.rectOf(id)! }
+      const to = { x: 999, y: 998, w: 10, h: 10 }
+
+      commit('editBox', (d) => {
+        d.edits[id] = { rect: to }
+        d.dirtyAt[id] = Date.now()
+      })
+      expect(workerUpdates()).toEqual([{ nodeId: id, old: from, next: to }])
+
+      undo()
+      expect(workerUpdates()[1]).toEqual({ nodeId: id, old: to, next: from })
+
+      redo()
+      expect(workerUpdates()[2]).toEqual({ nodeId: id, old: from, next: to })
+
+      s.dispose()
+    } finally {
+      vi.useRealTimers()
+      clean()
+    }
+  })
+
+  it('sends nothing when a commit does not move the box', async () => {
+    clean()
+    vi.useFakeTimers()
+    try {
+      const s = new Session(canvas(), createSyntheticDocument(4, 1))
+      await s.ready
+      await s.connectStream()
+      for (let i = 0; i < 40 && s.nodes.count === 0; i++) await vi.advanceTimersByTimeAsync(50)
+      const id = s.nodes.ids[0]
+      const same = { ...s.rectOf(id)! }
+
+      commit('editBox', (d) => {
+        d.edits[id] = { rect: same }
+        d.dirtyAt[id] = Date.now()
+      })
+
+      // Re-selecting or re-committing identical geometry must not churn the
+      // index: a remove+insert per no-op edit is how a QuadTree loses entries.
+      expect(workerUpdates()).toEqual([])
+      s.dispose()
+    } finally {
+      vi.useRealTimers()
+      clean()
+    }
   })
 })

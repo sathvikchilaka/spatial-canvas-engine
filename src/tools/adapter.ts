@@ -19,7 +19,7 @@ export function toolHandlers(tool: Tool, engine: CanvasEngine): ToolHandlers {
   return {
     onDown(p) {
       tool.onPointerDown(toEvent(p, engine.viewport.scale))
-      claimed = tool.ephemeralRect !== null
+      claimed = tool.capturing ?? tool.ephemeralRect !== null
       return claimed
     },
     onMove(p) {

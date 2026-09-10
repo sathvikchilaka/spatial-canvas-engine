@@ -1,6 +1,7 @@
 {
   "name": "spatial-canvas-engine",
   "private": true,
+  "packageManager": "pnpm@11.22.0",
   "version": "0.0.1",
   "type": "module",
   "scripts": {

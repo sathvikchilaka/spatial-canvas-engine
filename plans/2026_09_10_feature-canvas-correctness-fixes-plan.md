@@ -34,7 +34,7 @@
   - `private syncIndex(id: number, from: Rect, to: Rect): void` on `Session` — fire-and-forget `worker.updateNode`, swallowing the post-dispose rejection.
   - `SelectToolDeps` loses `onCommit`. Later tasks and plans (table mesh, relabel) rely on committing an `edits[id].rect` being *sufficient* to keep every index correct.
 
-- [ ] **Step 1: Extend the test file's `FakeWorker` to record index updates**
+- [x] **Step 1: Extend the test file's `FakeWorker` to record index updates**
 
 In `tests/app/session.test.ts`, inside the existing `class FakeWorker`, add a static recorder and capture `updateNode` messages. Put the two new lines at the top of the class body and the `if` block at the top of `postMessage`:
 
@@ -71,7 +71,7 @@ const workerUpdates = () =>
     .Worker.updates
 ```
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Append to `tests/app/session.test.ts`:
 
@@ -152,12 +152,12 @@ describe('spatial index synchronisation', () => {
 })
 ```
 
-- [ ] **Step 3: Run to verify failure**
+- [x] **Step 3: Run to verify failure**
 
 Run: `pnpm test -- tests/app/session.test.ts`
 Expected: FAIL — the first test records only the commit update (length 1, `[1]` and `[2]` undefined), because undo/redo never reach the worker.
 
-- [ ] **Step 4: Implement `writeCoords` / `syncIndex` in `src/app/session.ts`**
+- [x] **Step 4: Implement `writeCoords` / `syncIndex` in `src/app/session.ts`**
 
 Replace the whole `applyEdits` method with:
 
@@ -234,7 +234,7 @@ Delete the now-unused `private readonly rectScratch = new Float32Array(4)` field
 
 In the `new SelectTool({...})` construction, delete the `onCommit` property entirely (the four lines from `onCommit: (id, from, to) =>` through the closing `}),`).
 
-- [ ] **Step 5: Drop `onCommit` from the tool**
+- [x] **Step 5: Drop `onCommit` from the tool**
 
 In `src/tools/selectTool.ts`, remove from `SelectToolDeps`:
 
@@ -245,12 +245,12 @@ In `src/tools/selectTool.ts`, remove from `SelectToolDeps`:
 
 and in `onPointerUp`, remove the `this.deps.onCommit?.(id, from, to)` line. The commit itself is unchanged — `commit()` writing `edits[id].rect` is now the whole contract.
 
-- [ ] **Step 6: Run tests**
+- [x] **Step 6: Run tests**
 
 Run: `pnpm test && pnpm typecheck`
 Expected: PASS, including the pre-existing "restores stream geometry in the render arrays when an edit is undone" test.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/app/session.ts src/tools/selectTool.ts tests/app/session.test.ts
@@ -276,7 +276,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
   - `BucketGrid.move(index: number, pageIndex: number, from: Rect, to: Rect): void`
   - `Session` gains `private pageOf(i: number): number` returning `this.nodes.pages[i]`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/engine/bucketGrid.test.ts`:
 
@@ -316,12 +316,12 @@ describe('BucketGrid.move', () => {
 
 Add `import type { Rect } from '@/data/nodes'` if the file needs it (only if you annotate locals; the calls above pass literals).
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `pnpm test -- tests/engine/bucketGrid.test.ts`
 Expected: FAIL — `g.move is not a function`.
 
-- [ ] **Step 3: Implement in `src/engine/bucketGrid.ts`**
+- [x] **Step 3: Implement in `src/engine/bucketGrid.ts`**
 
 Add the three public methods and refactor `addPage` to use `insert`:
 
@@ -397,7 +397,7 @@ Add `import type { Rect } from '@/data/nodes'` at the top of the file.
 
 Note `insert`'s `touched.includes(k)` is O(cells-per-page); pages hold tens of cells, and this runs per ingested page or per edit, never per frame.
 
-- [ ] **Step 4: Call it from the session**
+- [x] **Step 4: Call it from the session**
 
 In `src/app/session.ts`, inside `writeCoords`, add the grid move immediately before `syncIndex`:
 
@@ -406,12 +406,12 @@ In `src/app/session.ts`, inside `writeCoords`, add the grid move immediately bef
     this.syncIndex(id, { x: fx, y: fy, w: fw, h: fh }, to)
 ```
 
-- [ ] **Step 5: Run tests**
+- [x] **Step 5: Run tests**
 
 Run: `pnpm test && pnpm typecheck`
 Expected: PASS (all of `tests/engine/bucketGrid.test.ts`, plus the session suite).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/engine/bucketGrid.ts src/app/session.ts tests/engine/bucketGrid.test.ts
@@ -433,7 +433,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - Consumes: `useStore.getState().edits`, `dirtyAt`.
 - Produces: `applyPageUpdate(pageIndex: number, ids: Uint32Array, coords: Float32Array): MergeResult` — signature unchanged, but the shield now keys on `edits[id]?.rect !== undefined`. `dirtyAt` keeps its current job: the "a human touched this" paint flag (`FLAG_DIRTY`) and telemetry.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/store/merge.test.ts`:
 
@@ -473,12 +473,12 @@ describe('shield predicate', () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `pnpm test -- tests/store/merge.test.ts`
 Expected: FAIL on the first test — `shielded` is 1 because `dirtyAt[1]` is set.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `src/store/merge.ts`, replace the `const dirty = useStore.getState().dirtyAt` line and the shield check:
 
@@ -510,12 +510,12 @@ Update the doc comment above `applyPageUpdate` — replace the "Dirty-node shiel
  * Cmd+Z must never rewind the model's output.
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `pnpm test && pnpm typecheck`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/store/merge.ts tests/store/merge.test.ts

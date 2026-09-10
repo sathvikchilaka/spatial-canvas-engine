@@ -3,7 +3,9 @@ import {
   buildMesh,
   cellRect,
   hitDivider,
+  mergeCells,
   moveDivider,
+  splitCell,
   MIN_BAND,
   type CellInput,
   type Mesh,
@@ -367,5 +369,93 @@ describe("hitDivider", () => {
     // >4px from every line (rows: 7/7/33/47, cols: 14/30/74), preserving the
     // "open cell space" intent without relying on a <= tie.
     expect(hitDivider(m, 120, 213, 4)).toBeNull()
+  })
+})
+
+describe("splitCell", () => {
+  it("adds a line and one cell, keeping every other cell rect unchanged", () => {
+    const m0 = buildMesh(insetGrid(2, 2))
+    const before = new Map(m0.cells.map((c) => [c.id, cellRect(m0, c)]))
+    const m1 = splitCell(m0, 1, "col", 5000)
+
+    expect(m1.cols).toHaveLength(4)
+    expect(m1.cells).toHaveLength(5)
+    // Cell 2 sat in the other column band: its geometry must not move.
+    const c2 = m1.cells.find((c) => c.id === 2)!
+    expect(cellRect(m1, c2)).toEqual(before.get(2))
+    // Cell 3 shares cell 1's column and gains a span instead of splitting.
+    const c3 = m1.cells.find((c) => c.id === 3)!
+    expect(c3.colSpan).toBe(2)
+    expect(cellRect(m1, c3)).toEqual(before.get(3))
+  })
+
+  it("splits the target into two halves that tile its old rect", () => {
+    const m0 = buildMesh(insetGrid(2, 2))
+    const old = cellRect(
+      m0,
+      m0.cells.find((c) => c.id === 1)!
+    )
+    const m1 = splitCell(m0, 1, "col", 5000)
+    const a = cellRect(
+      m1,
+      m1.cells.find((c) => c.id === 1)!
+    )
+    const b = cellRect(
+      m1,
+      m1.cells.find((c) => c.id === 5000)!
+    )
+    expect(a.x).toBe(old.x)
+    expect(a.w + b.w).toBeCloseTo(old.w, 6)
+    expect(b.x).toBeCloseTo(old.x + old.w / 2, 6)
+    expect(a.h).toBe(old.h)
+    expect(b.h).toBe(old.h)
+  })
+
+  it("splits by row as well", () => {
+    const m1 = splitCell(buildMesh(insetGrid(2, 2)), 1, "row", 5000)
+    expect(m1.rows).toHaveLength(4)
+    expect(m1.cells.find((c) => c.id === 5000)!.row).toBe(1)
+  })
+
+  it("keeps the derived lines monotonic after a split", () => {
+    expectMonotonic(splitCell(buildMesh(insetGrid(2, 2)), 1, "col", 5000))
+    expectMonotonic(splitCell(buildMesh(insetGrid(2, 2)), 1, "row", 5000))
+  })
+
+  it("ignores an unknown cell id", () => {
+    const m0 = buildMesh(insetGrid(2, 2))
+    expect(splitCell(m0, 999, "col", 5000)).toBe(m0)
+  })
+})
+
+describe("mergeCells", () => {
+  it("merges two horizontally adjacent cells into one spanning cell", () => {
+    const m0 = buildMesh(insetGrid(2, 2))
+    const m1 = mergeCells(m0, 1, 2)
+    expect(m1.cells).toHaveLength(3)
+    const merged = m1.cells.find((c) => c.id === 1)!
+    expect(merged.colSpan).toBe(2)
+    expect(cellRect(m1, merged)).toEqual({
+      x: m1.cols[0],
+      y: m1.rows[0],
+      w: m1.bounds.w,
+      h: m1.rows[1] - m1.rows[0],
+    })
+  })
+
+  it("merges vertically too", () => {
+    const m1 = mergeCells(buildMesh(insetGrid(2, 2)), 1, 3)
+    expect(m1.cells.find((c) => c.id === 1)!.rowSpan).toBe(2)
+    expect(m1.cells).toHaveLength(3)
+  })
+
+  it("refuses non-adjacent cells", () => {
+    const m0 = buildMesh(insetGrid(2, 2))
+    expect(mergeCells(m0, 1, 4)).toBe(m0)
+  })
+
+  it("refuses an unknown id", () => {
+    const m0 = buildMesh(insetGrid(2, 2))
+    expect(mergeCells(m0, 1, 999)).toBe(m0)
   })
 })

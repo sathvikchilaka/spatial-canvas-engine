@@ -280,3 +280,120 @@ export function hitDivider(
   }
   return null
 }
+
+/**
+ * Inserts a divider at the target cell's midpoint. A grid mesh has no local
+ * lines — a new line crosses the whole table — so every *other* cell straddling
+ * it gains a span and keeps its rect, and only the target actually splits.
+ * `newId` is supplied by the caller so the operation is deterministic and can
+ * be replayed by redo.
+ */
+export function splitCell(
+  mesh: Mesh,
+  cellId: number,
+  axis: "row" | "col",
+  newId: number
+): Mesh {
+  const target = mesh.cells.find((c) => c.id === cellId)
+  if (!target) return mesh
+
+  const lines = axis === "row" ? mesh.rows : mesh.cols
+  const from = axis === "row" ? target.row : target.col
+  const span = axis === "row" ? target.rowSpan : target.colSpan
+  const lo = lines[from]
+  const hi = lines[Math.min(lines.length - 1, from + span)]
+  const at = (lo + hi) / 2
+  const insertAt = from + 1
+
+  const nextLines = [...lines.slice(0, insertAt), at, ...lines.slice(insertAt)]
+
+  const cells: MeshCell[] = []
+  for (const c of mesh.cells) {
+    const cFrom = axis === "row" ? c.row : c.col
+    const cSpan = axis === "row" ? c.rowSpan : c.colSpan
+    const shiftedFrom = cFrom >= insertAt ? cFrom + 1 : cFrom
+    // Straddles the new line: widen the span so the rect is unchanged.
+    const straddles = cFrom < insertAt && cFrom + cSpan >= insertAt
+    const shiftedSpan = c.id === cellId ? 1 : straddles ? cSpan + 1 : cSpan
+    cells.push(
+      axis === "row"
+        ? { ...c, row: shiftedFrom, rowSpan: shiftedSpan }
+        : { ...c, col: shiftedFrom, colSpan: shiftedSpan }
+    )
+  }
+  cells.push(
+    axis === "row"
+      ? {
+          id: newId,
+          row: insertAt,
+          col: target.col,
+          rowSpan: 1,
+          colSpan: target.colSpan,
+        }
+      : {
+          id: newId,
+          row: target.row,
+          col: insertAt,
+          rowSpan: target.rowSpan,
+          colSpan: 1,
+        }
+  )
+
+  const rows = axis === "row" ? nextLines : mesh.rows
+  const cols = axis === "col" ? nextLines : mesh.cols
+  return {
+    rows,
+    cols,
+    bounds: {
+      x: cols[0],
+      y: rows[0],
+      w: cols[cols.length - 1] - cols[0],
+      h: rows[rows.length - 1] - rows[0],
+    },
+    cells,
+  }
+}
+
+/**
+ * Merges two band-adjacent cells into one spanning cell, keeping `aId`. `bId`'s
+ * node is dropped by the caller (an `Edit.deleted` entry), so this returns a
+ * mesh with one fewer cell.
+ */
+export function mergeCells(mesh: Mesh, aId: number, bId: number): Mesh {
+  const a = mesh.cells.find((c) => c.id === aId)
+  const b = mesh.cells.find((c) => c.id === bId)
+  if (!a || !b) return mesh
+
+  const sameRow = a.row === b.row && a.rowSpan === b.rowSpan
+  const sameCol = a.col === b.col && a.colSpan === b.colSpan
+  const hAdjacent =
+    sameRow && (a.col + a.colSpan === b.col || b.col + b.colSpan === a.col)
+  const vAdjacent =
+    sameCol && (a.row + a.rowSpan === b.row || b.row + b.rowSpan === a.row)
+  if (!hAdjacent && !vAdjacent) return mesh
+
+  const merged: MeshCell = hAdjacent
+    ? {
+        id: aId,
+        row: a.row,
+        rowSpan: a.rowSpan,
+        col: Math.min(a.col, b.col),
+        colSpan: a.colSpan + b.colSpan,
+      }
+    : {
+        id: aId,
+        col: a.col,
+        colSpan: a.colSpan,
+        row: Math.min(a.row, b.row),
+        rowSpan: a.rowSpan + b.rowSpan,
+      }
+
+  return {
+    rows: [...mesh.rows],
+    cols: [...mesh.cols],
+    bounds: { ...mesh.bounds },
+    cells: mesh.cells
+      .filter((c) => c.id !== aId && c.id !== bId)
+      .concat(merged),
+  }
+}

@@ -166,7 +166,7 @@ export function TreeView({ nodes, version, onFocus, meta, onRelabel }: Props) {
   const slice = rows.slice(first, first + visibleCount)
 
   return (
-    <aside className="flex w-72 shrink-0 flex-col border-r border-border bg-card">
+    <aside className="flex h-full w-full flex-col bg-card">
       <div className="border-b border-border px-3 py-2">
         <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
           Structure

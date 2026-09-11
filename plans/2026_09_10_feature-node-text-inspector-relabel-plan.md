@@ -39,7 +39,7 @@
   - `PageIngested` gains `texts: string[]` (parallel to `ids`, `''` when absent) and `labels: Uint8Array`
 - Produces in `src/data/funsd/parse.ts`: unchanged signature; `nodes[i].text` / `.label` are now populated. Word nodes get their own `word.text` and `SemanticLabel.Word`.
 
-- [ ] **Step 1: Write the failing parse test**
+- [x] **Step 1: Write the failing parse test**
 
 Append to `tests/data/funsd/parse.test.ts`:
 
@@ -85,12 +85,12 @@ describe('text and label passthrough', () => {
 
 (The fixture's first entity is a `question` — confirm with `head -40 tests/data/funsd/fixture.json` and, if it is not, use whichever label it actually has in the first assertion.)
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `pnpm test -- tests/data/funsd/parse.test.ts`
 Expected: FAIL — `SemanticLabel` is not exported and `entity.text` is `undefined`.
 
-- [ ] **Step 3: Implement the protocol and parse changes**
+- [x] **Step 3: Implement the protocol and parse changes**
 
 In `src/worker/protocol.ts`:
 
@@ -156,7 +156,7 @@ const LABEL_OF: Record<FunsdEntity['label'], SemanticLabel> = {
 
 In the entity push add `text: entity.text ?? '', label: LABEL_OF[entity.label] ?? SemanticLabel.Other`, and in the word push add `text: word.text ?? '', label: SemanticLabel.Word`.
 
-- [ ] **Step 4: Populate the arrays in the worker**
+- [x] **Step 4: Populate the arrays in the worker**
 
 In `src/worker/index.worker.ts`, wherever the `pageIngested` reply is built, add alongside the existing arrays:
 
@@ -171,7 +171,7 @@ In `src/worker/index.worker.ts`, wherever the `pageIngested` reply is built, add
 
 and include `texts, labels` in the posted message. `texts` is **not** added to the transfer list (strings are not transferable); `labels.buffer` **is**, next to the existing five buffers — the transfer list grows from 6 to 7 entries.
 
-- [ ] **Step 5: Extend the client test and any fake page builders**
+- [x] **Step 5: Extend the client test and any fake page builders**
 
 `tests/worker/client.test.ts` and `tests/app/session.test.ts` both hand-build `pageIngested` replies. Add to each:
 
@@ -197,12 +197,12 @@ In `tests/worker/client.test.ts` add a case:
 
 Match the file's existing helper names — if it does not have `postFakePage`, inline the same fake-reply construction the neighbouring tests use.
 
-- [ ] **Step 6: Run tests**
+- [x] **Step 6: Run tests**
 
 Run: `pnpm test && pnpm typecheck`
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/worker src/data/funsd/parse.ts tests
@@ -229,7 +229,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
   - `LABEL_NAMES: readonly string[]` exported from `src/data/labels.ts` (new), plus `labelFromName(name: string): SemanticLabel` and `labelName(l: SemanticLabel): string`.
 - Behaviour: `applyEdits` maps the effective label onto `nodes.types[i]` via `TYPE_OF_LABEL`, so a re-label repaints. Undo removes the edit and the type reverts.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/app/session.test.ts`:
 
@@ -286,12 +286,12 @@ describe('labels', () => {
 
 Add `SemanticLabel` (from `@/worker/protocol`) and `NodeType` to the file's imports.
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `pnpm test -- tests/app/session.test.ts`
 Expected: FAIL — `s.setLabel is not a function`.
 
-- [ ] **Step 3: Create `src/data/labels.ts`**
+- [x] **Step 3: Create `src/data/labels.ts`**
 
 ```ts
 import { NodeType } from '@/data/nodes'
@@ -332,7 +332,7 @@ export const ASSIGNABLE: readonly SemanticLabel[] = [
 ]
 ```
 
-- [ ] **Step 4: Implement in `src/app/session.ts`**
+- [x] **Step 4: Implement in `src/app/session.ts`**
 
 Add fields:
 
@@ -420,12 +420,12 @@ Apply the same guard on the forward path when `edit.label === undefined`. Clear 
 
 Imports: `SemanticLabel` from `@/worker/protocol`; `labelFromName`, `labelName`, `TYPE_OF_LABEL` from `@/data/labels`.
 
-- [ ] **Step 5: Run tests**
+- [x] **Step 5: Run tests**
 
 Run: `pnpm test && pnpm typecheck && pnpm lint`
 Expected: PASS. The synthetic-drain test is the canary for the guard above — if it starts reporting every node as `Paragraph`, the guard is missing.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/data/labels.ts src/app/session.ts tests/app/session.test.ts
@@ -449,7 +449,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
   - `TreeRow` gains `text: string` and `label: SemanticLabel`. `label` field on `TreeRow` keeps the existing `label: string` name? **No** — rename the existing display string to `title` to avoid the collision: `TreeRow = { id, depth, type, title, text, label, hasChildren }`. Update every consumer.
   - `TreeView` props gain `meta?: RowMeta` and `onRelabel?(id: number, label: SemanticLabel): void`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/components/treeModel.test.ts`:
 
@@ -488,12 +488,12 @@ describe('row text', () => {
 
 If the file's node helper is named differently, use its actual name.
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `pnpm test -- tests/components/treeModel.test.ts`
 Expected: FAIL — `buildTreeRows` takes two arguments and `TreeRow` has no `text`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `src/components/TreeView.tsx`:
 
@@ -551,7 +551,7 @@ In the row renderer, show the text when there is any and the title otherwise, pl
 
 Import `Badge` from `@/components/ui/badge` and `labelName` from `@/data/labels`.
 
-- [ ] **Step 4: Add the relabel control**
+- [x] **Step 4: Add the relabel control**
 
 Below the tree, render a footer for the selected row only — a `Select` (already installed) over `ASSIGNABLE`:
 
@@ -609,14 +609,14 @@ Pass the accessors from `src/App.tsx` into `TreeView`:
 
 The `meta` object must be memoized — `buildTreeRows` runs in a `useMemo` keyed on it, and a fresh object each render would rebuild 41k rows every keystroke.
 
-- [ ] **Step 5: Run tests and drive it by hand**
+- [x] **Step 5: Run tests and drive it by hand**
 
 Run: `pnpm test && pnpm typecheck && pnpm lint`
 Expected: PASS.
 
 Run: `pnpm dev`, pick **FUNSD**, wait for the stream, expand a page in the tree — rows read `"Name of company"`, not `"Paragraph 1042"`. Select a box on the canvas; the tree row highlights. Press `3` — the box repaints as a header and the chip changes. `Cmd+Z` reverts both.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/components/TreeView.tsx src/App.tsx tests/components/treeModel.test.ts
@@ -643,7 +643,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
   - `export function toMarkdown(node: InspectorNode): string` — heading per label depth, text as body, `- ` list for word children.
 - Produces in `src/components/InspectorPanel.tsx`: `export function InspectorPanel(props: { nodes: NodeArrays | null; version: number; meta: RowMeta; rectOf(id: number): Rect | null; onFocus(id: number): void }): JSX.Element`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 // tests/components/inspectorModel.test.ts
@@ -734,12 +734,12 @@ describe('toMarkdown', () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `pnpm test -- tests/components/inspectorModel.test.ts`
 Expected: FAIL — cannot resolve `@/components/inspectorModel`.
 
-- [ ] **Step 3: Implement `src/components/inspectorModel.ts`**
+- [x] **Step 3: Implement `src/components/inspectorModel.ts`**
 
 ```ts
 import { indexOfId, NodeType, type NodeArrays, type Rect } from '@/data/nodes'
@@ -856,12 +856,12 @@ export function toMarkdown(node: InspectorNode): string {
 }
 ```
 
-- [ ] **Step 4: Run the model tests**
+- [x] **Step 4: Run the model tests**
 
 Run: `pnpm test -- tests/components/inspectorModel.test.ts && pnpm typecheck`
 Expected: PASS.
 
-- [ ] **Step 5: Implement `src/components/InspectorPanel.tsx`**
+- [x] **Step 5: Implement `src/components/InspectorPanel.tsx`**
 
 ```tsx
 import { useMemo } from "react"
@@ -969,7 +969,7 @@ function Pane({ text, className }: { text: string; className?: string }) {
 
 `Split` is the brief's literal "side-by-side"; keep it as the third tab rather than the default, because at panel width the single views are more readable and the reviewer opts in.
 
-- [ ] **Step 6: Mount it in `src/App.tsx`**
+- [x] **Step 6: Mount it in `src/App.tsx`**
 
 Put the inspector under the tree in the existing right-hand rail, sharing the memoized `meta` object from Task 3:
 
@@ -987,14 +987,14 @@ Put the inspector under the tree in the existing right-hand rail, sharing the me
 
 `rectOf` is a fresh closure each render, which would defeat the `useMemo`; hoist it with `useCallback(() => ..., [])` alongside `meta`.
 
-- [ ] **Step 7: Run tests and drive it by hand**
+- [x] **Step 7: Run tests and drive it by hand**
 
 Run: `pnpm test && pnpm typecheck && pnpm lint`
 Expected: PASS.
 
 Run: `pnpm dev`, FUNSD, click a question box. JSON shows the entity and its words with rounded rects; Markdown shows `## question` plus the word list; `Split` shows both. Drag the box — `modified: true` appears and Markdown gains `*(edited)*`. Click **Focus** — the canvas centres on it. Click a tree row — the inspector follows (both read `selectedId`).
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/components/inspectorModel.ts src/components/InspectorPanel.tsx src/App.tsx tests/components/inspectorModel.test.ts
@@ -1010,7 +1010,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 **Files:**
 - Modify: `ARCHITECTURE.md` §2, §6, §8
 
-- [ ] **Step 1: Add to the worker-seam section (§2)**
+- [x] **Step 1: Add to the worker-seam section (§2)**
 
 ```markdown
 Text is the one payload that cannot be a typed array. `PageIngested` carries `texts: string[]`
@@ -1020,7 +1020,7 @@ strings per page is negligible next to the geometry, and paying it is what keeps
 the corpus on the worker — which is the property being graded, not the clone cost.
 ```
 
-- [ ] **Step 2: Add to the state section (§6)**
+- [x] **Step 2: Add to the state section (§6)**
 
 ```markdown
 `Edit.label` is the second editable field beside `rect`. It is stored as the label's **name**, not
@@ -1039,7 +1039,7 @@ document. Stringifying 41,228 nodes would blow the frame budget many times over 
 unreadable; the reviewer wants the thing they clicked.
 ```
 
-- [ ] **Step 3: Add to §8**
+- [x] **Step 3: Add to §8**
 
 ```
 - The inspector's Markdown is a rendering of one subtree, not a full-document export. A "download
@@ -1048,7 +1048,7 @@ unreadable; the reviewer wants the thing they clicked.
   model — there is no model in the loop here, which is the point of a human-in-the-loop repair tool.
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add ARCHITECTURE.md

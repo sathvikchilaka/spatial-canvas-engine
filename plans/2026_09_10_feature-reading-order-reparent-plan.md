@@ -858,7 +858,7 @@ If `orderOverlay` is not already a public field on `Engine`, expose it the way `
 Run: `pnpm test && pnpm typecheck && pnpm lint`
 Expected: PASS.
 
-- [ ] **Step 6: Drive it by hand**
+- [x] **Step 6: Drive it by hand**
 
 Run: `pnpm dev`, pick **FUNSD · 199pp · 41k boxes**, press `O`, zoom to ~120% until arrows and their endpoint dots are visible. Drag an arrowhead onto another box — the arrow re-points, `Cmd+Z` restores it in one step. Drag a tail onto a third box — the predecessor changes. Confirm the badges renumber after each commit (the graph is re-materialized, so `sequence` is rebuilt).
 
@@ -878,7 +878,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 **Files:**
 - Modify: `ARCHITECTURE.md` §5, §8
 
-- [ ] **Step 1: Rewrite the reading-order section's editing paragraph**
+- [x] **Step 1: Rewrite the reading-order section's editing paragraph**
 
 Replace whatever §5 currently says about linking with:
 
@@ -911,7 +911,7 @@ In §8, add:
   brief asks the flow to be visible and editable, not to be linearised canonically.
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add ARCHITECTURE.md

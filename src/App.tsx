@@ -9,6 +9,7 @@ import { StatusBar } from "@/components/StatusBar"
 import { Toolbar, type ToolName } from "@/components/Toolbar"
 import { TreeView } from "@/components/TreeView"
 import { Button } from "@/components/ui/button"
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { createFunsdDocument } from "@/data/funsd/source"
 import { ASSIGNABLE } from "@/data/labels"
 import type { NodeArrays } from "@/data/nodes"
@@ -192,9 +193,9 @@ export function App() {
           </Button>
         </div>
       </header>
-      <div className="flex min-h-0 flex-1">
-        <div className="flex min-h-0 shrink-0 flex-col">
-          <div className="flex min-h-0 flex-1">
+      <div className="min-h-0 flex-1">
+        <ResizablePanelGroup orientation="horizontal" autoSave="layout-repair-columns">
+          <ResizablePanel defaultSize="20" minSize="14" maxSize="35" className="bg-card">
             <TreeView
               nodes={nodes}
               version={stream.pagesReceived}
@@ -202,8 +203,15 @@ export function App() {
               meta={treeMeta}
               onRelabel={(id, label) => sessionRef.current?.setLabel(id, label)}
             />
-          </div>
-          <div className="flex min-h-0 flex-1 flex-col border-t border-border">
+          </ResizablePanel>
+          <ResizableHandle withHandle />
+          <ResizablePanel defaultSize="55" minSize="30">
+            <div className="relative h-full min-h-0">
+              <canvas ref={canvasRef} className="block h-full w-full touch-none" />
+            </div>
+          </ResizablePanel>
+          <ResizableHandle withHandle />
+          <ResizablePanel defaultSize="25" minSize="18" maxSize="45" className="bg-card">
             <InspectorPanel
               nodes={nodes}
               version={stream.pagesReceived}
@@ -211,11 +219,8 @@ export function App() {
               rectOf={rectOf}
               onFocus={focusNode}
             />
-          </div>
-        </div>
-        <div className="relative min-h-0 flex-1">
-          <canvas ref={canvasRef} className="block h-full w-full touch-none" />
-        </div>
+          </ResizablePanel>
+        </ResizablePanelGroup>
       </div>
       <StatusBar nodes={nodes?.count ?? 0} {...stats} {...stream} />
     </div>

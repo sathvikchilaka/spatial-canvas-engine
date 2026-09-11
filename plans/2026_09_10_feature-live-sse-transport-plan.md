@@ -611,7 +611,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
   - `DocumentSource.createStream(): StreamSource | Promise<StreamSource>`.
   - `Session.status` gains `transport: 'sse' | 'replay'`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/stream/source.test.ts`:
 
@@ -670,12 +670,12 @@ describe('createStreamSource', () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `pnpm test -- tests/stream/source.test.ts`
 Expected: FAIL — `createStreamSource` has no `fallback`/`expectPages` options and builds its own `MockStreamSource`.
 
-- [ ] **Step 3: Implement `createStreamSource`**
+- [x] **Step 3: Implement `createStreamSource`**
 
 ```ts
 /**
@@ -718,7 +718,7 @@ export async function createStreamSource(opts: {
 
 A missing `X-Page-Count` is treated as agreement: a third-party feed need not implement the header, and the reviewer can still see the page count in the status bar.
 
-- [ ] **Step 4: Wire the documents**
+- [x] **Step 4: Wire the documents**
 
 `src/data/document.ts`:
 
@@ -762,7 +762,7 @@ A missing `X-Page-Count` is treated as agreement: a third-party feed need not im
 
 with `private transport: 'sse' | 'replay' = 'replay'` and `transport` added to whatever `status` returns. The existing dispose-during-pending-geometry test guards the `this.disposed` check — do not drop it.
 
-- [ ] **Step 5: Show the transport in the status bar**
+- [x] **Step 5: Show the transport in the status bar**
 
 `src/components/StatusBar.tsx` — beside the existing connected/pages readout:
 
@@ -774,12 +774,12 @@ with `private transport: 'sse' | 'replay' = 'replay'` and `transport` added to w
 
 This is the honest signal the audit wanted: whichever path is running, the reviewer can see it.
 
-- [ ] **Step 6: Run tests**
+- [x] **Step 6: Run tests**
 
 Run: `pnpm test && pnpm typecheck && pnpm lint`
 Expected: PASS.
 
-- [ ] **Step 7: Drive both paths by hand**
+- [x] **Step 7: Drive both paths by hand**
 
 ```bash
 pnpm dev            # one terminal
@@ -787,7 +787,7 @@ pnpm dev:sse        # another
 ```
 Pick **FUNSD** — the status bar reads `live sse`, pages land out of order, and the ingest probe in the status bar stays under 16ms. Kill the SSE process and reload — the badge reads `replay`, and the document still fills. Pick **Stress** — always `replay`.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/stream src/data src/app/session.ts src/components/StatusBar.tsx tests/stream/source.test.ts
@@ -803,7 +803,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 **Files:**
 - Modify: `ARCHITECTURE.md` §2, §8
 
-- [ ] **Step 1: Replace the "Transport (stream)" text**
+- [x] **Step 1: Replace the "Transport (stream)" text**
 
 ```markdown
 ### Transport (stream)
@@ -830,7 +830,7 @@ distinction is never hidden. `pnpm dev:sse` starts the feed; it serves the FUNSD
 synthetic pages are generated inside the worker and have no body for a feed to push.
 ```
 
-- [ ] **Step 2: Add to §8**
+- [x] **Step 2: Add to §8**
 
 ```
 - The SSE endpoint is a dev-server process, so the deployed demo runs the replay transport. Making
@@ -841,7 +841,7 @@ synthetic pages are generated inside the worker and have no body for a feed to p
   covers the demo's needs.
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add ARCHITECTURE.md

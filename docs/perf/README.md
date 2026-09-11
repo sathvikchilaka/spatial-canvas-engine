@@ -38,7 +38,17 @@ await __bench()                              // oscillating pan, render path onl
 await __bench({ hover: true })               // + hover picks + React re-renders
 await __bench({ stress: true })              // cull bypassed: every node, every frame
 await __bench({ ms: 10000, amplitude: 800 }) // longer / wider sweep
+await __bench({ zoom: true })                // + oscillating zoom-to-cursor, 10%–500% style swing
+await __bench({ zoom: true, zoomRange: 4 })  // wider scale swing (start/4 .. start*4)
 ```
+
+`zoom: true` drives the *real* `zoomAt` path (`src/engine/viewport.ts`) about the
+canvas centre every frame, log-space so the swing is symmetric in scale rather
+than skewed toward zooming in. This exists because pan alone never crosses the
+raster re-decode threshold in `PageCache` (§ Memory management) — a pan-only
+bench can look flawless while a zoom sweep thrashes the raster cache. Not yet
+captured: a `docs/perf/*-zoom.json` run under this flag (tracked alongside the
+FUNSD captures below).
 
 The pan **oscillates** around the current viewport. An early version panned in a
 straight line, drifted off the document after ~2 s and reported a flawless 60 FPS

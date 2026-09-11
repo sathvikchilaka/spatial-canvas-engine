@@ -1,3 +1,4 @@
+import { zoomAt } from '@/engine/viewport'
 import type { Session } from './session'
 
 export type BenchResult = {
@@ -22,6 +23,14 @@ export type BenchOptions = {
   hover?: boolean
   /** Bypass culling and draw every node — the 10k-boxes-in-one-frame worst case. */
   stress?: boolean
+  /**
+   * Also oscillate scale via `zoomAt` about the canvas centre — the real
+   * zoom-to-cursor path, not a synthetic scale write. `zoomRange` is how far
+   * the scale swings either side of the start (e.g. 2 → between start/2 and
+   * start*2), covering the raster-threshold crossing pan alone never hits.
+   */
+  zoom?: boolean
+  zoomRange?: number
 }
 
 /**
@@ -31,8 +40,14 @@ export type BenchOptions = {
  * a frame counter alone cannot say which layer or which thread is at fault.
  */
 export function benchPan(session: Session, opts: BenchOptions | number = {}): Promise<BenchResult> {
-  const { ms = 5000, amplitude = 400, hover = false, stress = false } =
-    typeof opts === 'number' ? { ms: opts } : opts
+  const {
+    ms = 5000,
+    amplitude = 400,
+    hover = false,
+    stress = false,
+    zoom = false,
+    zoomRange = 2,
+  } = typeof opts === 'number' ? { ms: opts } : opts
 
   const engine = session.engine
   const canvas = engine.canvasEl
@@ -82,11 +97,28 @@ export function benchPan(session: Session, opts: BenchOptions | number = {}): Pr
       const t = performance.now() - t0
       // Two out-of-phase sines: motion in both axes, always returning to start.
       const phase = (t / 1000) * Math.PI
-      engine.setViewport({
-        scale: start.scale,
-        tx: start.tx + Math.sin(phase) * amplitude,
-        ty: start.ty + Math.sin(phase * 0.7) * amplitude,
-      })
+      if (zoom) {
+        // Log-space sine so the swing is symmetric in scale (start/zoomRange
+        // .. start*zoomRange), not skewed toward one side. `zoomAt` is
+        // multiplicative and stateful, so drive it off the *current* scale
+        // rather than integrating drift frame to frame.
+        const targetScale = start.scale * Math.pow(zoomRange, Math.sin(phase * 0.5))
+        const cx = rect.width / 2
+        const cy = rect.height / 2
+        const factor = targetScale / engine.viewport.scale
+        const zoomed = zoomAt(engine.viewport, cx, cy, factor)
+        engine.setViewport({
+          scale: zoomed.scale,
+          tx: start.tx + Math.sin(phase) * amplitude,
+          ty: start.ty + Math.sin(phase * 0.7) * amplitude,
+        })
+      } else {
+        engine.setViewport({
+          scale: start.scale,
+          tx: start.tx + Math.sin(phase) * amplitude,
+          ty: start.ty + Math.sin(phase * 0.7) * amplitude,
+        })
+      }
 
       if (hover) {
         pointerMoves++

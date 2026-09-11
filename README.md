@@ -22,14 +22,6 @@ pnpm dev            # http://localhost:5173
 The **Stress · 100pp · 10k boxes** document is generated in-browser and needs no assets — open
 the app, click it, and the 100-page / ~10,000-box corpus streams in.
 
-### Docker
-
-No local toolchain needed:
-
-```bash
-docker build -t spatial-canvas-engine .
-docker run --rm -p 8080:80 spatial-canvas-engine   # http://localhost:8080
-```
 
 ### The FUNSD document (optional)
 
@@ -84,9 +76,10 @@ pnpm prepare:funsd
 Open the production build with `?bench=1` and use the harness from the console:
 
 ```js
-await __bench()        // pan/zoom frame timings
-await __pick(200)      // click→selection latency, worker and end-to-end
-__ingest()             // main-thread long tasks during stream ingest
+await __bench()             // oscillating pan, frame timings
+await __bench({ zoom: true }) // + oscillating zoom-to-cursor sweep
+await __pick(200)           // click→selection latency, worker and end-to-end
+__ingest()                  // main-thread long tasks during stream ingest
 ```
 
 `docs/perf/README.md` explains every field, why the on-screen FPS counter is *not* the metric,

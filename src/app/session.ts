@@ -129,6 +129,16 @@ export class Session {
       if (this.disposed) return
       this.geometry = geometry
       this.engine.setData(this.nodes, this.grid, geometry)
+      if (geometry.count > 0) {
+        geometry.origin(0, this.pageRect)
+        const [px, py, pw, ph] = this.pageRect
+        const { w, h } = this.engine.size
+        this.engine.setViewport({
+          scale: 1,
+          tx: w / 2 - (px + pw / 2),
+          ty: h / 2 - (py + ph / 2),
+        })
+      }
     })
 
     this.selectTool = new SelectTool({

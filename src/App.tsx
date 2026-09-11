@@ -14,6 +14,7 @@ import { createFunsdDocument } from "@/data/funsd/source"
 import { ASSIGNABLE } from "@/data/labels"
 import type { NodeArrays } from "@/data/nodes"
 import { createSyntheticDocument } from "@/data/synthetic/source"
+import { zoomAt } from "@/engine/viewport"
 import { canRedo, canUndo, redo, resetHistory, undo, useStore } from "@/store/store"
 import { SemanticLabel } from "@/worker/protocol"
 
@@ -42,6 +43,12 @@ export function App() {
   )
   const rectOf = useCallback((id: number) => sessionRef.current?.rectOf(id) ?? null, [])
   const focusNode = useCallback((id: number) => sessionRef.current?.focusNode(id), [])
+  const zoomStep = useCallback((factor: number) => {
+    const engine = sessionRef.current?.engine
+    if (!engine) return
+    const { w, h } = engine.size
+    engine.setViewport(zoomAt(engine.viewport, w / 2, h / 2, factor))
+  }, [])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -222,7 +229,13 @@ export function App() {
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>
-      <StatusBar nodes={nodes?.count ?? 0} {...stats} {...stream} />
+      <StatusBar
+        nodes={nodes?.count ?? 0}
+        {...stats}
+        {...stream}
+        onZoomIn={() => zoomStep(1.2)}
+        onZoomOut={() => zoomStep(1 / 1.2)}
+      />
     </div>
   )
 }

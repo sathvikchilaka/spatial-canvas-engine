@@ -48,11 +48,11 @@ const TYPE_OF_KIND: Record<BlockKind, NodeType> = {
 }
 
 /**
- * Pages of the synthetic document sit in a contact sheet, not one tall column.
+ * Pages of the synthetic document sit in one column.
  * Must stay in step with the `gridGeometry` the engine builds for the paper —
  * this places the boxes, that places the paper under them.
  */
-export const PAGES_PER_ROW = 10
+export const PAGES_PER_ROW = 1
 
 /** Top-left of a page in world space. */
 export function pageOrigin(pageIndex: number): [number, number] {

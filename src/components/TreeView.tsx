@@ -36,6 +36,43 @@ const TYPE_LABEL: Record<number, string> = {
   [NodeType.Figure]: "Figure",
 }
 
+/**
+ * Sorts sibling node *indices* into the order a human reads the page: page,
+ * then line, then left-to-right.
+ *
+ * `nodes.order` is not usable here — FUNSD's parser restarts it at 0 on every
+ * page, so sorting by it interleaves all 199 pages. And sorting on raw y alone
+ * scrambles words that share a line but whose tops differ by a pixel or two
+ * ("INTERNATIONAL" y=1115 would land after "TOBACCO" y=1113), so nodes are
+ * clustered into lines first and x decides within a line.
+ */
+function sortReadingOrder(indices: number[], nodes: NodeArrays): void {
+  if (indices.length < 2) return
+  const xOf = (i: number) => nodes.coords[i * 4]
+  const yOf = (i: number) => nodes.coords[i * 4 + 1]
+
+  indices.sort(
+    (a, b) => nodes.pages[a] - nodes.pages[b] || yOf(a) - yOf(b) || xOf(a) - xOf(b),
+  )
+
+  // Second pass over the y-sorted run, so the line clustering stays transitive:
+  // a comparator with a fuzzy y would not be a total order.
+  let start = 0
+  for (let i = 1; i <= indices.length; i++) {
+    const head = indices[start]
+    const sameLine =
+      i < indices.length &&
+      nodes.pages[indices[i]] === nodes.pages[head] &&
+      yOf(indices[i]) - yOf(head) <= Math.max(nodes.coords[head * 4 + 3] * 0.6, 1)
+    if (sameLine) continue
+    if (i - start > 1) {
+      const line = indices.slice(start, i).sort((a, b) => xOf(a) - xOf(b))
+      for (let k = 0; k < line.length; k++) indices[start + k] = line[k]
+    }
+    start = i
+  }
+}
+
 /** Flattens the node hierarchy to the rows currently revealed. */
 export function buildTreeRows(
   nodes: NodeArrays,
@@ -56,6 +93,8 @@ export function buildTreeRows(
     else childrenOf.set(pid, [i])
   }
 
+  sortReadingOrder(roots, nodes)
+
   const rows: TreeRow[] = []
   const visit = (index: number, depth: number) => {
     const id = nodes.ids[index]
@@ -70,6 +109,9 @@ export function buildTreeRows(
       hasChildren: !!kids?.length,
     })
     if (!kids || !expanded.has(id)) return
+    // Sorted on reveal, not up front: collapsed subtrees are the common case
+    // and the stream rebuilds these rows on every page that lands.
+    sortReadingOrder(kids, nodes)
     for (const k of kids) visit(k, depth + 1)
   }
   for (const r of roots) visit(r, 0)

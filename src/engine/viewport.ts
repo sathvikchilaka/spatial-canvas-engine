@@ -32,6 +32,24 @@ export function panBy(vp: Viewport, dxScreen: number, dyScreen: number): Viewpor
   return { scale: vp.scale, tx: vp.tx + dxScreen, ty: vp.ty + dyScreen }
 }
 
+/**
+ * Keeps the document's world-space bounds within reach of the viewport — no
+ * panning into empty space beyond an edge. When content is smaller than the
+ * viewport on an axis, that axis is centered instead of clamped to a range.
+ */
+export function clampPan(
+  vp: Viewport,
+  bounds: { maxX: number; maxY: number },
+  cssW: number,
+  cssH: number,
+): Viewport {
+  const contentW = bounds.maxX * vp.scale
+  const contentH = bounds.maxY * vp.scale
+  const tx = contentW <= cssW ? (cssW - contentW) / 2 : Math.min(0, Math.max(cssW - contentW, vp.tx))
+  const ty = contentH <= cssH ? (cssH - contentH) / 2 : Math.min(0, Math.max(cssH - contentH, vp.ty))
+  return tx === vp.tx && ty === vp.ty ? vp : { scale: vp.scale, tx, ty }
+}
+
 export function visibleWorldRect(vp: Viewport, cssW: number, cssH: number) {
   const [x, y] = screenToWorld(vp, 0, 0)
   return { x, y, w: cssW / vp.scale, h: cssH / vp.scale }

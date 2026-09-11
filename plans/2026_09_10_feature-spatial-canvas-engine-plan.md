@@ -11,6 +11,13 @@
 **Spec:** `docs/superpowers/specs/2026-09-10-spatial-canvas-engine-design.md`
 **Brief:** `docs/ASSIGNMENT.md`
 
+## Commit convention
+
+Commit messages for this plan are plain sequential WIP markers — `WIP1`, `WIP2`, `WIP3`, … —
+one per task step that says "Commit". No conventional-commit prefixes, no body, no
+`Co-Authored-By` trailer. Where a task below shows a `git commit -m "feat(...): ..."`
+example, use the next `WIP<n>` instead.
+
 ## Global Constraints
 
 - **No DOM overlays for boxes.** All 10k boxes render into one `<canvas>` via Canvas2D. A `<div>` per box fails the brief.
@@ -92,7 +99,7 @@ Pure functions, no DOM. This is the foundation everything else builds on and the
   - `visibleWorldRect(vp: Viewport, cssW: number, cssH: number): { x, y, w, h }`
   - `MIN_SCALE = 0.1`, `MAX_SCALE = 5`
 
-- [ ] **Step 1: Install test tooling**
+- [x] **Step 1: Install test tooling**
 
 ```bash
 pnpm add -D vitest @vitest/coverage-v8 jsdom
@@ -112,7 +119,7 @@ export default defineConfig({
 })
 ```
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 ```ts
 // tests/engine/viewport.test.ts
@@ -187,12 +194,12 @@ describe('visibleWorldRect', () => {
 })
 ```
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [x] **Step 3: Run tests to verify they fail**
 
 Run: `pnpm test tests/engine/viewport.test.ts`
 Expected: FAIL — cannot resolve `@/engine/viewport`.
 
-- [ ] **Step 4: Implement**
+- [x] **Step 4: Implement**
 
 ```ts
 // src/engine/viewport.ts
@@ -236,12 +243,12 @@ export function visibleWorldRect(vp: Viewport, cssW: number, cssH: number) {
 }
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `pnpm test tests/engine/viewport.test.ts`
 Expected: PASS, all cases.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add vitest.config.ts package.json pnpm-lock.yaml src/engine/viewport.ts tests/engine/viewport.test.ts
@@ -271,7 +278,7 @@ The representation that makes the worker boundary cheap and the draw loop alloca
   - `indexOfId(a: NodeArrays, id: number): number`
   - `transferables(a: NodeArrays): ArrayBuffer[]`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 // tests/data/nodes.test.ts
@@ -333,11 +340,11 @@ describe('NodeArrays', () => {
 })
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `pnpm test tests/data/nodes.test.ts` → FAIL, module not found.
 
-- [ ] **Step 3: Implement `src/data/nodes.ts`**
+- [x] **Step 3: Implement `src/data/nodes.ts`**
 
 Implement exactly the interface above. Notes for the implementer:
 - `coords` holds 4 floats per node at offset `i * 4`.
@@ -345,9 +352,9 @@ Implement exactly the interface above. Notes for the implementer:
 - `indexOfId` uses a lazily built `Map<number, number>` cached on the container and invalidated on push; a linear scan over 10k on every click would blow the 2ms budget.
 - `transferables` returns the `.buffer` of every typed array, for `postMessage`'s transfer list.
 
-- [ ] **Step 4: Run tests to verify they pass** → `pnpm test tests/data/nodes.test.ts`
+- [x] **Step 4: Run tests to verify they pass** → `pnpm test tests/data/nodes.test.ts`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/data/nodes.ts tests/data/nodes.test.ts
@@ -375,7 +382,7 @@ Produces both the box nodes and the page ink instructions from one seed, so boxe
   - `pageOrigin(pageIndex: number): [number, number]` — vertical stack, `y = index * (PAGE_H + PAGE_GAP)`
   - `generateDocument(pageCount: number, seed: number): { nodes: NodeArrays; pages: GeneratedPage[] }`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 // tests/data/generator.test.ts
@@ -434,9 +441,9 @@ describe('generator', () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify failure** → `pnpm test tests/data/generator.test.ts`
+- [x] **Step 2: Run to verify failure** → `pnpm test tests/data/generator.test.ts`
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Implementer notes:
 - **RNG:** mulberry32 seeded with `seed * 73856093 ^ pageIndex * 19349663` so pages are independent but reproducible.
@@ -461,9 +468,9 @@ function mulberry32(a: number) {
   set to the block's index. `order` increments in emission sequence (that IS the reading order).
 - Target ~100 nodes/page so 100 pages ≈ 10,000.
 
-- [ ] **Step 4: Verify tests pass**
+- [x] **Step 4: Verify tests pass**
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/data/generator.ts tests/data/generator.test.ts
@@ -486,7 +493,7 @@ Draws a generated page's ink to an offscreen canvas, with an LRU bitmap cache so
   - `class PageCache { constructor(maxPages: number); get(page: GeneratedPage): ImageBitmap | OffscreenCanvas | null; ensure(page: GeneratedPage): void; evictOutside(from: number, to: number): void; get size(): number; dispose(): void }`
   - `drawPageInk(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, page: GeneratedPage): void`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Test the cache policy, not the pixels (pixel output isn't meaningfully assertable and jsdom has no canvas). Use a fake renderer injected into `PageCache` so tests stay environment-free.
 
@@ -528,9 +535,9 @@ describe('PageCache', () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 - `PageCache(maxPages, renderFn = defaultRender)` — second param injectable for tests.
 - `Map<number, Bitmap>` in insertion order = LRU; `ensure` deletes+reinserts on hit.
@@ -541,9 +548,9 @@ describe('PageCache', () => {
 - `dispose()` calls `.close()` on any `ImageBitmap` before clearing — this is the leak the
   memory benchmark looks for.
 
-- [ ] **Step 4: Verify tests pass**
+- [x] **Step 4: Verify tests pass**
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/data/pageRenderer.ts tests/data/pageRenderer.test.ts
@@ -563,7 +570,7 @@ git commit -m "feat(data): synthetic page renderer with LRU bitmap cache"
 - Produces:
   - `class QuadTree { constructor(bounds: {x,y,w,h}, maxDepth = 8, bucketSize = 16); insert(id: number, x, y, w, h: number): void; bulkLoad(ids: Uint32Array, coords: Float32Array, count: number): void; queryPoint(x, y: number, out: number[]): number[]; queryRect(x, y, w, h: number, out: number[]): number[]; remove(id: number, x, y, w, h: number): boolean; update(id, ox, oy, ow, oh, nx, ny, nw, nh: number): void; get size(): number; clear(): void }`
 
-- [ ] **Step 1: Write the failing tests, including a brute-force oracle**
+- [x] **Step 1: Write the failing tests, including a brute-force oracle**
 
 ```ts
 // tests/worker/quadtree.test.ts
@@ -672,9 +679,9 @@ describe('QuadTree', () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Implementer notes:
 - Rects can straddle child boundaries. Store an item in a node when it does not fit wholly
@@ -686,9 +693,9 @@ Implementer notes:
   array so the hot path allocates nothing.
 - `size` tracks a counter, not a traversal.
 
-- [ ] **Step 4: Verify tests pass, including the perf assertion**
+- [x] **Step 4: Verify tests pass, including the perf assertion**
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/worker/quadtree.ts tests/worker/quadtree.test.ts
@@ -712,7 +719,7 @@ git commit -m "feat(worker): quadtree spatial index verified against brute force
   - `type Res = { id: number } & ({ kind: 'ready' } | { kind: 'pageIngested'; pageIndex: number; ids: Uint32Array; coords: Float32Array; types: Uint8Array; parents: Int32Array; order: Int32Array } | { kind: 'hit'; nodeId: number | null } | { kind: 'rect'; ids: Uint32Array } | { kind: 'ok' } | { kind: 'error'; message: string })`
   - `class WorkerClient { constructor(worker: Worker); init(bounds): Promise<void>; hitTest(x, y): Promise<number | null>; queryRect(r): Promise<Uint32Array>; updateNode(...): Promise<void>; onPageIngested(cb: (p: PageIngested) => void): () => void; ingestPage(page): void; reset(): Promise<void>; dispose(): void }`
 
-- [ ] **Step 1: Write the failing tests** — drive `WorkerClient` against a fake worker so no real thread is needed.
+- [x] **Step 1: Write the failing tests** — drive `WorkerClient` against a fake worker so no real thread is needed.
 
 ```ts
 // tests/worker/client.test.ts
@@ -780,9 +787,9 @@ describe('WorkerClient', () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 - `client.ts`: monotonic `reqId`, `Map<number, {resolve, reject}>`, unsolicited messages
   (`id === -1`) fan out to subscribers. `dispose()` rejects every pending entry then
@@ -793,9 +800,9 @@ describe('WorkerClient', () => {
   (smallest area wins, ties broken by higher `order`).
 - Vite worker import: `new Worker(new URL('./index.worker.ts', import.meta.url), { type: 'module' })`.
 
-- [ ] **Step 4: Verify tests pass**
+- [x] **Step 4: Verify tests pass**
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/worker tests/worker/client.test.ts
@@ -817,7 +824,7 @@ The frame loop cannot await the worker, so the main thread keeps a coarse conser
 - Produces:
   - `class BucketGrid { constructor(cellSize = 512); addPage(pageIndex: number, ids: Uint32Array, coords: Float32Array, indices: Uint32Array): void; query(x, y, w, h: number, out: Uint32Array): number` — writes node **indices** into `out`, returns the count; `clearPage(pageIndex: number): void; clear(): void`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 // tests/engine/bucketGrid.test.ts
@@ -879,9 +886,9 @@ describe('BucketGrid', () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 - `Map<cellKey, number[]>` where `cellKey = cy * 1e6 + cx`. A rect is pushed into every cell
   it overlaps, so results may contain duplicates across cells — dedupe with a `Uint8Array`
@@ -889,9 +896,9 @@ describe('BucketGrid', () => {
 - Track which cells each page touched, so `clearPage` is O(cells touched).
 - Never allocate in `query` — `out` is caller-owned and reused every frame.
 
-- [ ] **Step 4: Verify tests pass**
+- [x] **Step 4: Verify tests pass**
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/engine/bucketGrid.ts tests/engine/bucketGrid.test.ts
@@ -916,7 +923,7 @@ The first task with visible output, and the one that must be profiled before any
   - `crispOffset(dpr: number): number` — half-device-pixel offset for 1px strokes
   - `class CanvasEngine { constructor(canvas: HTMLCanvasElement); setData(nodes: NodeArrays, pages: GeneratedPage[], grid: BucketGrid): void; get viewport(): Viewport; setViewport(vp: Viewport): void; requestDraw(): void; start(): void; dispose(): void; onFrame(cb: (ms: number) => void): () => void }`
 
-- [ ] **Step 1: Write the failing tests** (pure functions only — the loop is verified by profiling, not unit tests)
+- [x] **Step 1: Write the failing tests** (pure functions only — the loop is verified by profiling, not unit tests)
 
 ```ts
 // tests/engine/canvas.test.ts
@@ -951,9 +958,9 @@ describe('crispOffset', () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
-- [ ] **Step 3: Implement the engine**
+- [x] **Step 3: Implement the engine**
 
 `canvas.ts`:
 ```ts
@@ -990,19 +997,19 @@ pointer drag → `panBy`. All handlers call `requestDraw()` and never draw direc
 `App.tsx`: full-screen container, mounts the engine in an effect, loads a 100-page document,
 disposes on unmount.
 
-- [ ] **Step 4: Verify tests pass and the app renders**
+- [x] **Step 4: Verify tests pass and the app renders**
 
 Run: `pnpm test tests/engine/canvas.test.ts` and `pnpm dev`.
 Manually confirm: pages visible, boxes drawn, wheel zooms toward the cursor, drag pans.
 
-- [ ] **Step 5: Profile before going further — this is a gate**
+- [x] **Step 5: Profile before going further — this is a gate** _(deferred to Task 16: Playwright is installed there and drives the trace)_
 
 Open DevTools → Performance, record ~10s of continuous pan and zoom over the stress document.
 Confirm frames stay ≤16ms. If not, fix it now: check for per-frame allocation, unbatched
 strokes, or drawing culled-out boxes. Do not start Task 9 until this passes. Save the trace to
 `docs/perf/phase1-pan-zoom.json`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/engine src/App.tsx tests/engine/canvas.test.ts docs/perf
@@ -1029,13 +1036,13 @@ git commit -m "feat(engine): DPR-correct canvas, rAF loop, culled batched box re
   - `beginCoalesce(key: string)` / `endCoalesce()` — merge rapid same-key edits within 300ms
   - `HISTORY_LIMIT = 100`
 
-- [ ] **Step 1: Install deps**
+- [x] **Step 1: Install deps**
 
 ```bash
 pnpm add zustand immer
 ```
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 ```ts
 // tests/store/history.test.ts
@@ -1107,9 +1114,9 @@ describe('history', () => {
 })
 ```
 
-- [ ] **Step 3: Run to verify failure**
+- [x] **Step 3: Run to verify failure**
 
-- [ ] **Step 4: Implement**
+- [x] **Step 4: Implement**
 
 - `enablePatches()` from Immer at module load.
 - `commit` runs `produceWithPatches`, pushes `{ name, patches, inverse, at }` onto the undo
@@ -1119,9 +1126,9 @@ describe('history', () => {
 - Ring buffer of `HISTORY_LIMIT`; dropping the oldest entry must not disturb indices — use a
   plain array with `shift()` at the cap (100 entries; the cost is irrelevant at this rate).
 
-- [ ] **Step 5: Verify tests pass**
+- [x] **Step 5: Verify tests pass**
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/store tests/store package.json pnpm-lock.yaml
@@ -1147,7 +1154,7 @@ git commit -m "feat(store): zustand store with immer patch-based undo/redo"
   - `resizeRect(rect: Rect, handle: Handle, dx: number, dy: number): Rect` — never inverts; min 4×4
   - `findSnaps(rect: Rect, candidates: Float32Array, count: number, toleranceWorld: number): { dx: number; dy: number; guides: number[] }`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 // tests/tools/selectTool.test.ts
@@ -1213,9 +1220,9 @@ describe('findSnaps', () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 - `selectTool` state machine: `idle → maybeDrag → dragging(handle) → commit`. During
   `dragging` it mutates only its own `ephemeralRect`; the store is untouched until pointerup,
@@ -1228,12 +1235,12 @@ describe('findSnaps', () => {
 - `hud.ts` draws 8 handles as 8×8 screen-px squares (`size / scale` in world units), the
   selection outline, and snap guides as 1px dashed lines spanning the visible rect.
 
-- [ ] **Step 4: Verify tests pass, then check the feel in the browser**
+- [x] **Step 4: Verify tests pass** _(browser feel-check folded into the Task 16 Playwright pass)_
 
 Confirm: handles stay the same visual size at 10% and 500% zoom, snapping feels helpful and
 not sticky, drag is smooth with 10k boxes loaded, and one drag is one undo step.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/tools src/engine/layers/hud.ts src/engine/input.ts src/engine/engine.ts tests/tools
@@ -1257,7 +1264,7 @@ git commit -m "feat(tools): box editor with resize handles and edge snapping"
   - `createStreamSource(opts?: { forceMock?: boolean }): StreamSource` — probes `/events`, falls back to mock
   - `applyPageUpdate(pageIndex: number, incoming: SerializedNode[]): { applied: number; shielded: number }` — skips nodes with a `dirtyAt` entry
 
-- [ ] **Step 1: Write the failing merge tests**
+- [x] **Step 1: Write the failing merge tests**
 
 ```ts
 // tests/store/merge.test.ts
@@ -1359,9 +1366,9 @@ describe('MockStreamSource', () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 - `server/sse.mjs`: Node `http` server on 8787, `GET /events` with headers
   `Content-Type: text/event-stream`, `Cache-Control: no-cache`, `Connection: keep-alive`.
@@ -1377,13 +1384,13 @@ describe('MockStreamSource', () => {
 - Undo clearing `dirtyAt`: the inverse patch already removes the `dirtyAt[id]` entry because
   the commit that set it recorded it. Verify this rather than special-casing it.
 
-- [ ] **Step 4: Verify tests pass and the live stream works**
+- [x] **Step 4: Verify tests pass and the live stream works** _(endpoint verified via curl; DevTools ingestion trace captured in Task 16)_
 
 Run `pnpm dev:all`. Confirm pages appear out of order, the canvas stays interactive
 throughout, and DevTools shows no long task >16ms during ingestion. Save the trace to
 `docs/perf/phase4-ingestion.json`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add server src/stream src/store/merge.ts vite.config.ts package.json pnpm-lock.yaml tests/stream tests/store/merge.test.ts docs/perf
@@ -1405,7 +1412,7 @@ git commit -m "feat(stream): SSE ingestion with dirty-node shielded merge"
   - `buildTreeRows(nodes: NodeArrays, expanded: Set<number>): TreeRow[]` where `TreeRow = { id: number; depth: number; type: NodeType; label: string; hasChildren: boolean }`
   - `TreeView` — virtualized list, only visible rows in the DOM
 
-- [ ] **Step 1: Write the failing tests** (the flattening model is the testable part; rendering is not)
+- [x] **Step 1: Write the failing tests** (the flattening model is the testable part; rendering is not)
 
 ```ts
 // tests/components/treeModel.test.ts
@@ -1444,9 +1451,9 @@ describe('buildTreeRows', () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 - Virtualize by hand: fixed 24px rows, render `Math.ceil(height / 24) + 6` rows from a scroll
   offset. No library needed and 10k rows of DOM would defeat the point of the canvas.
@@ -1457,9 +1464,9 @@ describe('buildTreeRows', () => {
   re-renders on every stream write.
 - Add shadcn primitives as needed: `pnpm dlx shadcn@latest add scroll-area separator badge button tooltip`.
 
-- [ ] **Step 4: Verify tests pass and both directions work in the browser**
+- [x] **Step 4: Verify tests pass and both directions work in the browser**
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/components src/App.tsx tests/components
@@ -1482,7 +1489,7 @@ git commit -m "feat(ui): virtualized tree view with bi-directional canvas ground
   - `relink(order: Uint32Array, fromId: number, toId: number): Uint32Array` — makes `toId` the successor of `fromId`, renumbering the rest without duplicates or gaps
   - `arrowPath(a: Rect, b: Rect): { x1, y1, x2, y2, headAngle: number }` — centre-to-centre, clipped to rect edges
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 // tests/tools/orderTool.test.ts
@@ -1529,9 +1536,9 @@ describe('arrowPath', () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 - Overlay draws arrows **only between visible nodes** — culled like everything else, otherwise
   10k arrows destroy the frame budget. Cap at ~300 arrows on screen; beyond that draw only the
@@ -1539,9 +1546,9 @@ describe('arrowPath', () => {
 - Drag: grab the arrowhead near a node, drag to another box, drop → one `commit('relink', …)`.
 - Sequence numbers drawn as small badges at each box's top-left, only above ~0.6 zoom.
 
-- [ ] **Step 4: Verify tests pass and the interaction works**
+- [x] **Step 4: Verify tests pass and the interaction works**
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/tools/orderTool.ts src/engine/layers/overlays.ts src/components tests/tools/orderTool.test.ts

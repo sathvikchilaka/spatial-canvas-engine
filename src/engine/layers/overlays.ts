@@ -1,0 +1,130 @@
+import type { NodeArrays, Rect } from '@/data/nodes'
+import { arrowPath, type ArrowRecord } from '@/tools/orderTool'
+import { createEdgeSet, type EdgeSet } from '@/data/edges'
+
+const MAX_ARROWS = 300
+const HEAD = 9
+const BADGE_MIN_SCALE = 0.6
+
+/**
+ * Reading-order arrows, drawn only between nodes already culled in — 10k
+ * arrows would destroy the frame budget on their own. Iterates the visible
+ * set and looks up each node's out-edges from the pre-built adjacency map;
+ * never scans the whole edge set in the draw loop.
+ */
+export class OrderOverlay {
+  private readonly rectA: Rect = { x: 0, y: 0, w: 0, h: 0 }
+  private readonly rectB: Rect = { x: 0, y: 0, w: 0, h: 0 }
+  private edges: EdgeSet = createEdgeSet()
+
+  /**
+   * The arrows this overlay painted last frame, so the order tool can hit-test
+   * endpoints without re-deriving them. Pre-allocated to the arrow budget and
+   * overwritten in place — the draw loop allocates nothing.
+   */
+  readonly arrows: ArrowRecord[] = Array.from({ length: MAX_ARROWS }, () => ({
+    from: 0, to: 0, x1: 0, y1: 0, x2: 0, y2: 0,
+  }))
+  private painted = 0
+
+  get arrowCount(): number {
+    return this.painted
+  }
+
+  setGraph(edges: EdgeSet): void {
+    this.edges = edges
+  }
+
+  draw(
+    ctx: CanvasRenderingContext2D,
+    nodes: NodeArrays,
+    visible: Uint32Array,
+    visibleCount: number,
+    scale: number,
+    selectedIndex: number,
+    indexOfId: (id: number) => number,
+  ): void {
+    this.painted = 0
+    if (this.edges.count === 0) return
+    const budget = visibleCount > MAX_ARROWS && selectedIndex >= 0 ? 2 : MAX_ARROWS
+    ctx.save()
+    ctx.strokeStyle = 'rgba(120, 220, 180, 0.8)'
+    ctx.fillStyle = 'rgba(120, 220, 180, 0.8)'
+    ctx.lineWidth = 1.25 / scale
+
+    let drawn = 0
+    // Iterate the culled set, not the whole graph: the draw loop must never
+    // touch a node the viewport does not contain.
+    for (let k = 0; k < visibleCount && drawn < budget; k++) {
+      const ia = visible[k]
+      const targets = this.edges.adjacency.get(ia)
+      if (!targets) continue
+      readRect(nodes, ia, this.rectA)
+      for (let t = 0; t < targets.length && drawn < budget; t++) {
+        const ib = indexOfId(targets[t])
+        if (ib < 0) continue
+        readRect(nodes, ib, this.rectB)
+        const p = arrowPath(this.rectA, this.rectB)
+        ctx.beginPath()
+        ctx.moveTo(p.x1, p.y1)
+        ctx.lineTo(p.x2, p.y2)
+        ctx.stroke()
+        const h = HEAD / scale
+        ctx.beginPath()
+        ctx.moveTo(p.x2, p.y2)
+        ctx.lineTo(p.x2 - h * Math.cos(p.headAngle - 0.4), p.y2 - h * Math.sin(p.headAngle - 0.4))
+        ctx.lineTo(p.x2 - h * Math.cos(p.headAngle + 0.4), p.y2 - h * Math.sin(p.headAngle + 0.4))
+        ctx.closePath()
+        ctx.fill()
+        const rec = this.arrows[drawn]
+        rec.from = nodes.ids[ia]
+        rec.to = targets[t]
+        rec.x1 = p.x1
+        rec.y1 = p.y1
+        rec.x2 = p.x2
+        rec.y2 = p.y2
+        this.painted = drawn + 1
+        drawn++
+      }
+    }
+
+    if (scale >= BADGE_MIN_SCALE) this.drawBadges(ctx, nodes, visible, visibleCount, scale)
+    ctx.restore()
+  }
+
+  /**
+   * The node's reading position, not its out-degree. Out-degree answered the
+   * wrong question — a question node linking three answers showed "3" while the
+   * reviewer wanted to know where in the flow it sat. The number comes from
+   * `EdgeSet.sequence`, precomputed on graph change, so this stays a map lookup
+   * inside the frame loop.
+   */
+  private drawBadges(
+    ctx: CanvasRenderingContext2D,
+    nodes: NodeArrays,
+    visible: Uint32Array,
+    visibleCount: number,
+    scale: number,
+  ) {
+    if (this.edges.sequence.size === 0) return
+    ctx.fillStyle = 'rgba(255,255,255,0.75)'
+    ctx.font = `${11 / scale}px ui-monospace, monospace`
+    ctx.textBaseline = 'top'
+    const cap = Math.min(visibleCount, MAX_ARROWS)
+    for (let k = 0; k < cap; k++) {
+      const i = visible[k]
+      const n = this.edges.sequence.get(nodes.ids[i])
+      if (n === undefined) continue
+      const c = i * 4
+      ctx.fillText(String(n), nodes.coords[c] + 2 / scale, nodes.coords[c + 1] + 2 / scale)
+    }
+  }
+}
+
+function readRect(nodes: NodeArrays, i: number, out: Rect) {
+  const c = i * 4
+  out.x = nodes.coords[c]
+  out.y = nodes.coords[c + 1]
+  out.w = nodes.coords[c + 2]
+  out.h = nodes.coords[c + 3]
+}

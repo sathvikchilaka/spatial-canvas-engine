@@ -22,3 +22,10 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# FUNSD raw dataset — source data, not app assets
+dataset/
+
+# Playwright
+playwright-report/
+test-results/

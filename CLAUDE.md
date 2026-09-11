@@ -10,7 +10,10 @@ Design/architecture decisions: `ARCHITECTURE.md` (a graded deliverable, keep it 
 Renders multi-page document scans with **10,000+ interactive bounding-box overlays** at a
 sustained 60 FPS, fed by a live SSE stream of out-of-order extraction events, with all parsing
 and spatial indexing on a Web Worker, plus editing tools (box editor, reading-order graph,
-table mesh) backed by ≥50-level undo/redo.
+table mesh) backed by ≥50-level undo/redo. Ships two documents behind one `DocumentSource`
+interface: the real **199-page FUNSD corpus** (41,228 boxes, a real directed reading-order link
+graph, RVL-CDIP derived and licensed non-commercial research use only) and the **100-page/10k-box
+synthetic stress document** used to exercise the perf budgets below.
 
 ## Non-negotiables (graded)
 - **No DOM overlays for boxes.** Canvas2D/WebGL only. A `<div>` per box fails the brief.

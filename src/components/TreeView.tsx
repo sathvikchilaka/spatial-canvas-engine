@@ -1,14 +1,27 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
+import { Badge } from "@/components/ui/badge"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { ASSIGNABLE, labelFromName, labelName } from "@/data/labels"
 import { NodeType, indexOfId, type NodeArrays } from "@/data/nodes"
 import { cn } from "@/lib/utils"
-import { useStore } from "@/store/store"
+import { setUiState, useStore } from "@/store/store"
+import { SemanticLabel } from "@/worker/protocol"
+
+export type RowMeta = {
+  textOf(id: number): string
+  labelOf(id: number): SemanticLabel
+}
 
 export type TreeRow = {
   id: number
   depth: number
   type: NodeType
-  label: string
+  /** Type-and-id fallback, e.g. "Line 1042". Always present. */
+  title: string
+  /** Extracted text, `''` when the source has none. */
+  text: string
+  label: SemanticLabel
   hasChildren: boolean
 }
 
@@ -23,8 +36,49 @@ const TYPE_LABEL: Record<number, string> = {
   [NodeType.Figure]: "Figure",
 }
 
+/**
+ * Sorts sibling node *indices* into the order a human reads the page: page,
+ * then line, then left-to-right.
+ *
+ * `nodes.order` is not usable here — FUNSD's parser restarts it at 0 on every
+ * page, so sorting by it interleaves all 199 pages. And sorting on raw y alone
+ * scrambles words that share a line but whose tops differ by a pixel or two
+ * ("INTERNATIONAL" y=1115 would land after "TOBACCO" y=1113), so nodes are
+ * clustered into lines first and x decides within a line.
+ */
+function sortReadingOrder(indices: number[], nodes: NodeArrays): void {
+  if (indices.length < 2) return
+  const xOf = (i: number) => nodes.coords[i * 4]
+  const yOf = (i: number) => nodes.coords[i * 4 + 1]
+
+  indices.sort(
+    (a, b) => nodes.pages[a] - nodes.pages[b] || yOf(a) - yOf(b) || xOf(a) - xOf(b),
+  )
+
+  // Second pass over the y-sorted run, so the line clustering stays transitive:
+  // a comparator with a fuzzy y would not be a total order.
+  let start = 0
+  for (let i = 1; i <= indices.length; i++) {
+    const head = indices[start]
+    const sameLine =
+      i < indices.length &&
+      nodes.pages[indices[i]] === nodes.pages[head] &&
+      yOf(indices[i]) - yOf(head) <= Math.max(nodes.coords[head * 4 + 3] * 0.6, 1)
+    if (sameLine) continue
+    if (i - start > 1) {
+      const line = indices.slice(start, i).sort((a, b) => xOf(a) - xOf(b))
+      for (let k = 0; k < line.length; k++) indices[start + k] = line[k]
+    }
+    start = i
+  }
+}
+
 /** Flattens the node hierarchy to the rows currently revealed. */
-export function buildTreeRows(nodes: NodeArrays, expanded: Set<number>): TreeRow[] {
+export function buildTreeRows(
+  nodes: NodeArrays,
+  expanded: Set<number>,
+  meta?: RowMeta,
+): TreeRow[] {
   // `parents[i]` holds the parent's *id* (the wire shape), not its row index.
   const childrenOf = new Map<number, number[]>()
   const roots: number[] = []
@@ -39,6 +93,8 @@ export function buildTreeRows(nodes: NodeArrays, expanded: Set<number>): TreeRow
     else childrenOf.set(pid, [i])
   }
 
+  sortReadingOrder(roots, nodes)
+
   const rows: TreeRow[] = []
   const visit = (index: number, depth: number) => {
     const id = nodes.ids[index]
@@ -47,10 +103,15 @@ export function buildTreeRows(nodes: NodeArrays, expanded: Set<number>): TreeRow
       id,
       depth,
       type: nodes.types[index] as NodeType,
-      label: `${TYPE_LABEL[nodes.types[index]] ?? "Node"} ${id}`,
+      title: `${TYPE_LABEL[nodes.types[index]] ?? "Node"} ${id}`,
+      text: meta?.textOf(id) ?? "",
+      label: meta?.labelOf(id) ?? SemanticLabel.None,
       hasChildren: !!kids?.length,
     })
     if (!kids || !expanded.has(id)) return
+    // Sorted on reveal, not up front: collapsed subtrees are the common case
+    // and the stream rebuilds these rows on every page that lands.
+    sortReadingOrder(kids, nodes)
     for (const k of kids) visit(k, depth + 1)
   }
   for (const r of roots) visit(r, 0)
@@ -62,13 +123,15 @@ type Props = {
   /** Bumped by the session when the document changes, to rebuild rows. */
   version: number
   onFocus(id: number): void
+  meta?: RowMeta
+  onRelabel?(id: number, label: SemanticLabel): void
 }
 
 /**
  * Hand-virtualized: 10k rows of DOM would reintroduce the very bottleneck the
  * canvas exists to avoid.
  */
-export function TreeView({ nodes, version, onFocus }: Props) {
+export function TreeView({ nodes, version, onFocus, meta, onRelabel }: Props) {
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set())
   const [scrollTop, setScrollTop] = useState(0)
   const [height, setHeight] = useState(600)
@@ -79,8 +142,8 @@ export function TreeView({ nodes, version, onFocus }: Props) {
   const hoveredId = useStore((s) => s.hoveredId)
 
   const rows = useMemo(
-    () => (nodes ? buildTreeRows(nodes, expanded) : []),
-    [nodes, expanded, version],
+    () => (nodes ? buildTreeRows(nodes, expanded, meta) : []),
+    [nodes, expanded, version, meta],
   )
 
   useEffect(() => {
@@ -145,7 +208,7 @@ export function TreeView({ nodes, version, onFocus }: Props) {
   const slice = rows.slice(first, first + visibleCount)
 
   return (
-    <aside className="flex w-72 shrink-0 flex-col border-r border-border bg-card">
+    <aside className="flex h-full w-full flex-col bg-card">
       <div className="border-b border-border px-3 py-2">
         <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
           Structure
@@ -158,7 +221,7 @@ export function TreeView({ nodes, version, onFocus }: Props) {
         ref={scrollRef}
         className="min-h-0 flex-1 overflow-y-auto"
         onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
-        onMouseLeave={() => useStore.setState({ hoveredId: null })}
+        onMouseLeave={() => setUiState({ hoveredId: null })}
       >
         <div style={{ height: rows.length * ROW_H, position: "relative" }}>
           {slice.map((row, i) => {
@@ -174,9 +237,9 @@ export function TreeView({ nodes, version, onFocus }: Props) {
                   row.id === selectedId && "bg-accent text-accent-foreground",
                   row.id === hoveredId && row.id !== selectedId && "bg-muted",
                 )}
-                onMouseEnter={() => useStore.setState({ hoveredId: row.id })}
+                onMouseEnter={() => setUiState({ hoveredId: row.id })}
                 onClick={() => {
-                  useStore.setState({ selectedId: row.id })
+                  setUiState({ selectedId: row.id })
                   onFocus(row.id)
                 }}
               >
@@ -194,12 +257,42 @@ export function TreeView({ nodes, version, onFocus }: Props) {
                 ) : (
                   <span className="w-3" aria-hidden />
                 )}
-                <span className="truncate">{row.label}</span>
+                <span className="truncate text-sm">{row.text || row.title}</span>
+                {row.label !== SemanticLabel.None && row.label !== SemanticLabel.Word ? (
+                  <Badge
+                    variant="secondary"
+                    className="ml-auto shrink-0 text-[10px] uppercase tracking-wider"
+                  >
+                    {labelName(row.label)}
+                  </Badge>
+                ) : null}
               </button>
             )
           })}
         </div>
       </div>
+      {selectedId !== null && onRelabel ? (
+        <div className="flex items-center gap-2 border-t border-border px-3 py-2">
+          <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            Label
+          </span>
+          <Select
+            value={labelName(meta?.labelOf(selectedId) ?? SemanticLabel.None)}
+            onValueChange={(v) => onRelabel(selectedId, labelFromName(v))}
+          >
+            <SelectTrigger className="h-7 w-32 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {ASSIGNABLE.map((l) => (
+                <SelectItem key={l} value={labelName(l)} className="text-xs">
+                  {labelName(l)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      ) : null}
     </aside>
   )
 }

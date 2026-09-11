@@ -15,6 +15,18 @@ export type PageGeometry = {
   rangeFor(y: number, h: number): [number, number]
 }
 
+/** Bottom-right corner of the document in world space — for pan clamping. */
+export function geometryBounds(geometry: PageGeometry): { maxX: number; maxY: number } {
+  let maxX = 0
+  let maxY = 0
+  for (let i = 0; i < geometry.count; i++) {
+    const c = i * 4
+    maxX = Math.max(maxX, geometry.rects[c] + geometry.rects[c + 2])
+    maxY = Math.max(maxY, geometry.rects[c + 1] + geometry.rects[c + 3])
+  }
+  return { maxX, maxY }
+}
+
 function build(rects: Float32Array, count: number): PageGeometry {
   return {
     count,

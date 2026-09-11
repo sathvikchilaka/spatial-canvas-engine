@@ -11,5 +11,12 @@ export interface DocumentSource {
   readonly pageCount: number
   geometry(): Promise<PageGeometry>
   raster(page: number): Promise<PageBitmap>
-  createStream(): StreamSource
+  /**
+   * The transport for this document. May be async because the live endpoint is
+   * probed before the replay is chosen. `onStatus`, when given, is wired
+   * through to the live source (if one is adopted) so callers learn about
+   * connect/disconnect/reconnect after the initial call returns; a document
+   * whose transport never goes live (e.g. synthetic) can ignore it.
+   */
+  createStream(onStatus?: (connected: boolean) => void): StreamSource | Promise<StreamSource>
 }

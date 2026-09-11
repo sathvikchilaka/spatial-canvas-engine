@@ -2,38 +2,49 @@ import { cn } from "@/lib/utils"
 
 type Props = {
   nodes: number
-  fps: number
-  /** Worst repaint cost in the last sample window, ms. */
-  drawMs: number
-  /** Frames actually repainted in the window — 0 means idle, not slow. */
-  drawn: number
   zoom: number
   pagesReceived: number
   shielded: number
   connected: boolean
   done: boolean
+  failed: number
+  onZoomIn?: () => void
+  onZoomOut?: () => void
 }
 
 export function StatusBar({
   nodes,
-  fps,
-  drawMs,
-  drawn,
   zoom,
   pagesReceived,
   shielded,
   connected,
   done,
+  failed,
+  onZoomIn,
+  onZoomOut,
 }: Props) {
   return (
     <footer className="flex items-center gap-4 border-t border-border bg-card px-4 py-1.5 font-mono text-xs text-muted-foreground">
       <span>{nodes.toLocaleString()} boxes</span>
-      <span>{Math.round(zoom * 100)}%</span>
-      <span className={cn(fps > 0 && fps < 50 && "text-destructive")}>{fps} fps</span>
-      {/* Repaint cost is the real budget; fps alone tracks how often input arrives. */}
-      <span className={cn(drawMs > 16 && "text-destructive")} title="worst repaint in last 500ms">
-        {drawn === 0 ? "idle" : `${drawMs.toFixed(2)} ms draw`}
-      </span>
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={onZoomOut}
+          className="flex h-4 w-4 cursor-pointer items-center justify-center rounded-sm border border-border transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-muted-foreground/60 disabled:pointer-events-none disabled:opacity-50"
+          aria-label="Zoom out"
+        >
+          −
+        </button>
+        <span className="w-10 text-center">{Math.round(zoom * 100)}%</span>
+        <button
+          type="button"
+          onClick={onZoomIn}
+          className="flex h-4 w-4 cursor-pointer items-center justify-center rounded-sm border border-border transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-muted-foreground/60 disabled:pointer-events-none disabled:opacity-50"
+          aria-label="Zoom in"
+        >
+          +
+        </button>
+      </div>
       <span className="ml-auto flex items-center gap-1.5">
         <span
           className={cn(
@@ -44,6 +55,7 @@ export function StatusBar({
         {done ? "stream complete" : connected ? "streaming" : "disconnected"} · {pagesReceived} pages
       </span>
       {shielded > 0 && <span className="text-amber-400">{shielded} edits preserved</span>}
+      {failed > 0 && <span className="text-destructive">{failed} pages failed</span>}
     </footer>
   )
 }

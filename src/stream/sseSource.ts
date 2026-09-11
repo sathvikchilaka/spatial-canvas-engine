@@ -1,16 +1,35 @@
 import type { StreamEvent, StreamSource } from './source'
 
 /**
- * NOT WIRED. Both `DocumentSource.createStream()` implementations return the
- * timer-driven, SSE-shaped replays instead, so nothing in the app imports this
- * module and `server/sse.mjs` / `pnpm dev:sse` are only reachable by hand. Kept
- * because it is the transport the `StreamSource` interface was shaped for; see
- * ARCHITECTURE.md §2 ("Transport (stream)"), which says so rather than
- * implying the EventSource path runs.
+ * The wire envelope, kept deliberately tiny: `t` for type, `i` for page index,
+ * `d` for the page body as a string. Only the envelope is parsed on the main
+ * thread; the body — tens of KB per page — is forwarded to the worker as a
+ * string, so no document structure is materialised on the main thread, which
+ * is what keeps ingest off the 16ms budget.
  */
 
 const RECONNECT_BASE_MS = 500
 const RECONNECT_MAX_MS = 8000
+
+/**
+ * Parses only the envelope — never the page body — and returns a
+ * `StreamEvent`, or null when the envelope itself is malformed.
+ */
+export function parseSseEnvelope(data: string): StreamEvent | null {
+  let env: unknown
+  try {
+    env = JSON.parse(data)
+  } catch {
+    return null
+  }
+  if (typeof env !== 'object' || env === null) return null
+  const e = env as { t?: unknown; i?: unknown; d?: unknown }
+  if (e.t === 'd') return { type: 'done' }
+  if (e.t !== 'p') return null
+  if (typeof e.i !== 'number' || !Number.isInteger(e.i) || e.i < 0) return null
+  if (typeof e.d !== 'string') return null
+  return { type: 'page', pageIndex: e.i, payload: e.d }
+}
 
 /** EventSource client with exponential-backoff reconnect. */
 export class SseStreamSource implements StreamSource {
@@ -55,11 +74,9 @@ export class SseStreamSource implements StreamSource {
       this.onStatus?.(true)
     }
     es.onmessage = (ev) => {
-      try {
-        this.handler?.(JSON.parse(ev.data) as StreamEvent)
-      } catch {
-        // Malformed payload: drop it. One bad page never poisons the document.
-      }
+      const parsed = parseSseEnvelope(ev.data)
+      // Malformed payload: drop it. One bad page never poisons the document.
+      if (parsed) this.handler?.(parsed)
     }
     es.onerror = () => {
       es.close()
@@ -72,26 +89,40 @@ export class SseStreamSource implements StreamSource {
   }
 }
 
-/** Probes the endpoint; falls back to the in-app emitter when it is absent. */
-export async function createStreamSource(opts?: {
+/**
+ * Probes the endpoint and adopts the live transport only if it is both present
+ * and consistent with the document. A feed that disagrees on page count is
+ * worse than no feed — pages would go missing with no error anywhere — so
+ * disagreement falls back rather than being trusted.
+ *
+ * The endpoint exists only under `pnpm dev:sse`/`pnpm dev:all` (`vite.config.ts`
+ * proxies `/events` to `server/sse.mjs`, which those scripts start); bare
+ * `pnpm dev`, `vite preview`, and a static deploy have none. The fallback is
+ * therefore the normal path in production, not an error case.
+ */
+export async function createStreamSource(opts: {
+  fallback: () => StreamSource
   forceMock?: boolean
-  pageCount?: number
-  seed?: number
+  expectPages?: number
   url?: string
   onStatus?: (connected: boolean) => void
+  timeoutMs?: number
 }): Promise<StreamSource> {
-  const { MockStreamSource } = await import('./mockSource')
-  const pageCount = opts?.pageCount ?? 100
-  if (opts?.forceMock) return new MockStreamSource(pageCount, opts?.seed ?? 1)
-  const url = opts?.url ?? '/events'
+  if (opts.forceMock) return opts.fallback()
+  const url = opts.url ?? '/events'
   try {
     const ctrl = new AbortController()
-    const t = setTimeout(() => ctrl.abort(), 300)
+    const t = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 300)
     const res = await fetch(url, { method: 'HEAD', signal: ctrl.signal })
     clearTimeout(t)
-    if (res.ok) return new SseStreamSource(url, opts?.onStatus)
+    if (res.ok) {
+      const advertised = res.headers.get('X-Page-Count')
+      const agrees =
+        opts.expectPages === undefined || advertised === null || Number(advertised) === opts.expectPages
+      if (agrees) return new SseStreamSource(url, opts.onStatus)
+    }
   } catch {
-    // endpoint absent — fall through
+    // endpoint absent, blocked, or slow — fall through to the replay
   }
-  return new MockStreamSource(pageCount, opts?.seed ?? 1)
+  return opts.fallback()
 }

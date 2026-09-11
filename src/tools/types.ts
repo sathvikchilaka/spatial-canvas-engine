@@ -18,6 +18,12 @@ export type Tool = {
   drawHud(ctx: CanvasRenderingContext2D, vp: Viewport): void
   /** Geometry mid-gesture; the store sees nothing until commit. */
   readonly ephemeralRect: Rect | null
+  /**
+   * True while the tool owns the pointer. The adapter suppresses the pan
+   * fallback on this, not on `ephemeralRect` — a tool can hold a gesture
+   * (dragging a table divider) without producing a draft rect.
+   */
+  readonly capturing?: boolean
 }
 
 export type Handle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w' | 'move' | null

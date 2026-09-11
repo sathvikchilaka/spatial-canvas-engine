@@ -3,7 +3,7 @@ import { createNodeArrays, pushNode, type NodeArrays, type NodeType, type Rect }
 import { parseFunsdPage, type FunsdForm } from '@/data/funsd/parse'
 import { serializeGeneratedPage } from '@/data/synthetic/serialize'
 import { QuadTree } from './quadtree'
-import { UNSOLICITED, type Req, type Res, type SerializedPage } from './protocol'
+import { SemanticLabel, UNSOLICITED, type Req, type Res, type SerializedPage } from './protocol'
 
 const SYNTHETIC = 'synthetic://page/'
 
@@ -39,13 +39,31 @@ function ingest(page: SerializedPage, edges: number[] = []) {
   const parents = nodes.parents.slice(start, nodes.count)
   const order = nodes.order.slice(start, nodes.count)
   const edgeArray = Int32Array.from(edges)
+  const texts = new Array<string>(page.nodes.length)
+  const labels = new Uint8Array(page.nodes.length)
+  for (let i = 0; i < page.nodes.length; i++) {
+    texts[i] = page.nodes[i].text ?? ''
+    labels[i] = page.nodes[i].label ?? SemanticLabel.None
+  }
   const res: Res = {
     id: UNSOLICITED, kind: 'pageIngested', pageIndex: page.pageIndex,
-    ids, coords, types, parents, order, edges: edgeArray,
+    ids, coords, types, parents, order, edges: edgeArray, texts, labels,
   }
   ;(self as unknown as Worker).postMessage(res, [
     ids.buffer, coords.buffer, types.buffer, parents.buffer, order.buffer, edgeArray.buffer,
+    labels.buffer,
   ] as Transferable[])
+}
+
+/**
+ * Parse one page's annotation JSON and publish the result. Shared by
+ * `ingestUrl` (worker fetches the asset) and `ingestJson` (a live SSE event
+ * pushed the body inline) so there is exactly one parser call site.
+ */
+function ingestForm(pageIndex: number, text: string, offsetX: number, offsetY: number) {
+  const form = JSON.parse(text) as FunsdForm
+  const { nodes: parsed, edges } = parseFunsdPage(form, pageIndex, offsetX, offsetY)
+  ingest({ pageIndex, nodes: parsed }, edges)
 }
 
 /**
@@ -67,9 +85,8 @@ async function ingestUrl(pageIndex: number, url: string, offsetX: number, offset
   }
   const res = await fetch(url)
   if (!res.ok) throw new Error(`funsd fetch failed: ${res.status}`)
-  const form = (await res.json()) as FunsdForm
-  const { nodes: parsed, edges } = parseFunsdPage(form, pageIndex, offsetX, offsetY)
-  ingest({ pageIndex, nodes: parsed }, edges)
+  const text = await res.text()
+  ingestForm(pageIndex, text, offsetX, offsetY)
 }
 
 /** Topmost hit: smallest area wins, ties broken by later reading order. */
@@ -116,6 +133,17 @@ self.onmessage = (e: MessageEvent<Req>) => {
           reply({ id: UNSOLICITED, kind: 'error', message: (err as Error).message }),
         )
         break
+      case 'ingestJson': {
+        try {
+          ingestForm(msg.pageIndex, msg.json, msg.offsetX, msg.offsetY)
+          reply({ id: msg.id, kind: 'ok' })
+        } catch (err) {
+          // A single malformed event must not kill the worker — the other 198
+          // pages are still coming.
+          reply({ id: msg.id, kind: 'error', message: String((err as Error).message ?? err) })
+        }
+        break
+      }
       case 'hitTest':
         reply({ id: msg.id, kind: 'hit', nodeId: hitTest(msg.x, msg.y) })
         break
@@ -136,6 +164,36 @@ self.onmessage = (e: MessageEvent<Req>) => {
           nodes.coords[c + 2] = next.w
           nodes.coords[c + 3] = next.h
         }
+        reply({ id: msg.id, kind: 'ok' })
+        break
+      }
+      case 'insertNode': {
+        const n = msg.node
+        // A node id can be re-inserted (redo of a creation, or unhiding a
+        // merged-away cell): reuse its row rather than appending a duplicate.
+        const existing = indexById.get(n.id)
+        const i =
+          existing ??
+          pushNode(nodes, {
+            id: n.id, page: n.page, x: n.x, y: n.y, w: n.w, h: n.h,
+            type: n.type as NodeType, parent: n.parent, order: n.order,
+          })
+        if (existing !== undefined) {
+          const c = existing * 4
+          nodes.coords[c] = n.x
+          nodes.coords[c + 1] = n.y
+          nodes.coords[c + 2] = n.w
+          nodes.coords[c + 3] = n.h
+        }
+        indexById.set(n.id, i)
+        tree.insert(n.id, n.x, n.y, n.w, n.h)
+        reply({ id: msg.id, kind: 'ok' })
+        break
+      }
+      case 'removeNode': {
+        // The row stays in `nodes` (indices are stable and referenced by
+        // `indexById`); dropping it from the tree is what makes it unhittable.
+        tree.remove(msg.nodeId, msg.rect.x, msg.rect.y, msg.rect.w, msg.rect.h)
         reply({ id: msg.id, kind: 'ok' })
         break
       }

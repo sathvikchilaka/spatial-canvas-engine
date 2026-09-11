@@ -1,3 +1,5 @@
+import type { Rect } from '@/data/nodes'
+
 type Bucket = { idx: number[]; page: number[] }
 
 /**
@@ -30,30 +32,63 @@ export class BucketGrid {
     indices: Uint32Array,
   ): void {
     void ids
-    const touched = this.pageCells.get(pageIndex) ?? []
-    const s = this.cellSize
     for (let i = 0; i < indices.length; i++) {
       const c = i * 4
-      const x = coords[c]
-      const y = coords[c + 1]
-      const x1 = Math.floor((x + coords[c + 2]) / s)
-      const y1 = Math.floor((y + coords[c + 3]) / s)
-      for (let cy = Math.floor(y / s); cy <= y1; cy++) {
-        for (let cx = Math.floor(x / s); cx <= x1; cx++) {
-          const k = this.key(cx, cy)
-          let bucket = this.cells.get(k)
-          if (!bucket) {
-            bucket = { idx: [], page: [] }
-            this.cells.set(k, bucket)
-            touched.push(k)
-          }
-          bucket.idx.push(indices[i])
-          bucket.page.push(pageIndex)
-        }
-      }
-      if (indices[i] >= this.stamps.length) this.growStamps(indices[i] + 1)
+      this.insert(indices[i], pageIndex, coords[c], coords[c + 1], coords[c + 2], coords[c + 3])
     }
+  }
+
+  /** Adds one node index to every cell its rect touches. */
+  insert(index: number, pageIndex: number, x: number, y: number, w: number, h: number): void {
+    const s = this.cellSize
+    const touched = this.pageCells.get(pageIndex) ?? []
+    const x1 = Math.floor((x + w) / s)
+    const y1 = Math.floor((y + h) / s)
+    for (let cy = Math.floor(y / s); cy <= y1; cy++) {
+      for (let cx = Math.floor(x / s); cx <= x1; cx++) {
+        const k = this.key(cx, cy)
+        let bucket = this.cells.get(k)
+        if (!bucket) {
+          bucket = { idx: [], page: [] }
+          this.cells.set(k, bucket)
+        }
+        // `touched` is what clearPage walks, so a cell entered *after* ingest
+        // (an edited box crossing a cell line) must be recorded here too or a
+        // document switch leaves the entry behind.
+        if (!touched.includes(k)) touched.push(k)
+        bucket.idx.push(index)
+        bucket.page.push(pageIndex)
+      }
+    }
+    if (index >= this.stamps.length) this.growStamps(index + 1)
     this.pageCells.set(pageIndex, touched)
+  }
+
+  /** Drops one node index from every cell the given rect touched. */
+  remove(index: number, x: number, y: number, w: number, h: number): void {
+    const s = this.cellSize
+    const x1 = Math.floor((x + w) / s)
+    const y1 = Math.floor((y + h) / s)
+    for (let cy = Math.floor(y / s); cy <= y1; cy++) {
+      for (let cx = Math.floor(x / s); cx <= x1; cx++) {
+        const k = this.key(cx, cy)
+        const bucket = this.cells.get(k)
+        if (!bucket) continue
+        for (let i = bucket.idx.length - 1; i >= 0; i--) {
+          if (bucket.idx[i] === index) {
+            bucket.idx.splice(i, 1)
+            bucket.page.splice(i, 1)
+          }
+        }
+        if (bucket.idx.length === 0) this.cells.delete(k)
+      }
+    }
+  }
+
+  /** remove + insert, so an edited box is culled at the place it now occupies. */
+  move(index: number, pageIndex: number, from: Rect, to: Rect): void {
+    this.remove(index, from.x, from.y, from.w, from.h)
+    this.insert(index, pageIndex, to.x, to.y, to.w, to.h)
   }
 
   /** Writes node indices into `out`, returns the count. Allocation-free. */

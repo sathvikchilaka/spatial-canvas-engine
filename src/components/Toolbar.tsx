@@ -1,13 +1,14 @@
-import { MousePointer2, Workflow } from "lucide-react"
+import { MousePointer2, Table2, Workflow } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
-export type ToolName = "select" | "order"
+export type ToolName = "select" | "order" | "table"
 
 const TOOLS: Array<{ name: ToolName; label: string; Icon: typeof MousePointer2 }> = [
   { name: "select", label: "Select & edit boxes (V)", Icon: MousePointer2 },
   { name: "order", label: "Reading order (O)", Icon: Workflow },
+  { name: "table", label: "Table mesh (T)", Icon: Table2 },
 ]
 
 export function Toolbar({

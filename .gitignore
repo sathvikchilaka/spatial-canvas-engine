@@ -25,3 +25,7 @@ dist-ssr
 
 # FUNSD raw dataset — source data, not app assets
 dataset/
+
+# Playwright
+playwright-report/
+test-results/

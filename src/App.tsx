@@ -1,17 +1,22 @@
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { benchPan, benchPick } from "@/app/bench"
 import { ingestReport, markStreamDone, startIngestProbe, stopIngestProbe } from "@/app/ingestProbe"
 import { Session } from "@/app/session"
 import { DocumentPicker, type DocumentId } from "@/components/DocumentPicker"
+import { InspectorPanel } from "@/components/InspectorPanel"
 import { StatusBar } from "@/components/StatusBar"
 import { Toolbar, type ToolName } from "@/components/Toolbar"
 import { TreeView } from "@/components/TreeView"
 import { Button } from "@/components/ui/button"
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { createFunsdDocument } from "@/data/funsd/source"
+import { ASSIGNABLE } from "@/data/labels"
 import type { NodeArrays } from "@/data/nodes"
 import { createSyntheticDocument } from "@/data/synthetic/source"
+import { zoomAt } from "@/engine/viewport"
 import { canRedo, canUndo, redo, resetHistory, undo, useStore } from "@/store/store"
+import { SemanticLabel } from "@/worker/protocol"
 
 export function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -23,10 +28,27 @@ export function App() {
     shielded: 0,
     connected: false,
     done: false,
+    transport: "replay" as "sse" | "replay",
+    failed: 0,
   })
   const [tool, setTool] = useState<ToolName>("select")
   const [docId, setDocId] = useState<DocumentId>("funsd")
   const selectedId = useStore((s) => s.selectedId)
+  const treeMeta = useMemo(
+    () => ({
+      textOf: (id: number) => sessionRef.current?.textOf(id) ?? "",
+      labelOf: (id: number) => sessionRef.current?.labelOf(id) ?? SemanticLabel.None,
+    }),
+    [],
+  )
+  const rectOf = useCallback((id: number) => sessionRef.current?.rectOf(id) ?? null, [])
+  const focusNode = useCallback((id: number) => sessionRef.current?.focusNode(id), [])
+  const zoomStep = useCallback((factor: number) => {
+    const engine = sessionRef.current?.engine
+    if (!engine) return
+    const { w, h } = engine.size
+    engine.setViewport(zoomAt(engine.viewport, w / 2, h / 2, factor))
+  }, [])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -54,6 +76,10 @@ export function App() {
         w.__bench = (opts?: unknown) => benchPan(session, opts as never)
         w.__pick = (samples?: number) => benchPick(session, samples)
         w.__ingest = () => ingestReport()
+        // Read-only status for the e2e suite — the same object the status bar renders.
+        w.__status = () => session.status
+        // Read-only edit map, so the suite can assert undo/redo without reading the DOM.
+        w.__edits = () => useStore.getState().edits
       }
       setNodes(session.nodes)
 
@@ -91,7 +117,33 @@ export function App() {
     }
     void build()
 
+    // V / O / T, as the toolbar's labels promise. Owned by the same effect as
+    // the session so the listener cannot outlive it.
+    const onToolKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return
+      if (document.querySelector('[role="combobox"][data-state="open"]')) return
+      const k = e.key.toLowerCase()
+      const next: ToolName | null =
+        k === "v" ? "select" : k === "o" ? "order" : k === "t" ? "table" : null
+      if (next) {
+        setTool(next)
+        sessionRef.current?.setTool(next)
+        return
+      }
+      // 1–4 relabel the selection: the fast path for bulk correction.
+      const digit = "1234".indexOf(e.key)
+      if (digit >= 0) {
+        const sel = useStore.getState().selectedId
+        if (sel !== null) sessionRef.current?.setLabel(sel, ASSIGNABLE[digit])
+        return
+      }
+    }
+    window.addEventListener("keydown", onToolKey)
+
     return () => {
+      window.removeEventListener("keydown", onToolKey)
       cancelled = true
       stopIngestProbe()
       offFrame?.()
@@ -105,8 +157,17 @@ export function App() {
       w.__bench = null
       w.__pick = null
       w.__ingest = null
+      w.__status = null
+      w.__edits = null
       setNodes(null)
-      setStream({ pagesReceived: 0, shielded: 0, connected: false, done: false })
+      setStream({
+        pagesReceived: 0,
+        shielded: 0,
+        connected: false,
+        done: false,
+        transport: "replay",
+        failed: 0,
+      })
       useStore.setState(
         { edits: {}, dirtyAt: {}, selectedId: null, hoveredId: null, edgesAdded: [], edgesRemoved: [] },
         true,
@@ -139,17 +200,42 @@ export function App() {
           </Button>
         </div>
       </header>
-      <div className="flex min-h-0 flex-1">
-        <TreeView
-          nodes={nodes}
-          version={stream.pagesReceived}
-          onFocus={(id) => sessionRef.current?.focusNode(id)}
-        />
-        <div className="relative min-h-0 flex-1">
-          <canvas ref={canvasRef} className="block h-full w-full touch-none" />
-        </div>
+      <div className="min-h-0 flex-1">
+        <ResizablePanelGroup orientation="horizontal" autoSave="layout-repair-columns">
+          <ResizablePanel defaultSize="20" minSize="14" maxSize="35" className="bg-card">
+            <TreeView
+              nodes={nodes}
+              version={stream.pagesReceived}
+              onFocus={focusNode}
+              meta={treeMeta}
+              onRelabel={(id, label) => sessionRef.current?.setLabel(id, label)}
+            />
+          </ResizablePanel>
+          <ResizableHandle withHandle />
+          <ResizablePanel defaultSize="55" minSize="30">
+            <div className="relative h-full min-h-0">
+              <canvas ref={canvasRef} className="block h-full w-full touch-none" />
+            </div>
+          </ResizablePanel>
+          <ResizableHandle withHandle />
+          <ResizablePanel defaultSize="25" minSize="18" maxSize="45" className="bg-card">
+            <InspectorPanel
+              nodes={nodes}
+              version={stream.pagesReceived}
+              meta={treeMeta}
+              rectOf={rectOf}
+              onFocus={focusNode}
+            />
+          </ResizablePanel>
+        </ResizablePanelGroup>
       </div>
-      <StatusBar nodes={nodes?.count ?? 0} {...stats} {...stream} />
+      <StatusBar
+        nodes={nodes?.count ?? 0}
+        {...stats}
+        {...stream}
+        onZoomIn={() => zoomStep(1.2)}
+        onZoomOut={() => zoomStep(1 / 1.2)}
+      />
     </div>
   )
 }

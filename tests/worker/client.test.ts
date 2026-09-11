@@ -93,10 +93,70 @@ describe('WorkerClient.ingestUrl', () => {
         id: UNSOLICITED, kind: 'pageIngested', pageIndex: 0,
         ids: new Uint32Array(0), coords: new Float32Array(0), types: new Uint8Array(0),
         parents: new Int32Array(0), order: new Int32Array(0), edges: Int32Array.of(1, 2),
+        texts: [], labels: new Uint8Array(0),
       },
     } as MessageEvent)
 
     expect(Array.from(seen[0])).toEqual([1, 2])
+    client.dispose()
+  })
+
+  it('forwards texts and labels to the ingest handler', async () => {
+    // Extend the existing fake reply with the two new fields and assert the
+    // handler receives them verbatim — the seam is the only place text can be
+    // silently dropped, and it already was once.
+    const worker = { postMessage: vi.fn(), terminate: vi.fn() } as unknown as Worker
+    const client = new WorkerClient(worker)
+    const received: string[][] = []
+    client.onPageIngested((p) => received.push([...p.texts]))
+
+    worker.onmessage?.({
+      data: {
+        id: UNSOLICITED, kind: 'pageIngested', pageIndex: 0,
+        ids: new Uint32Array(0), coords: new Float32Array(0), types: new Uint8Array(0),
+        parents: new Int32Array(0), order: new Int32Array(0), edges: new Int32Array(0),
+        texts: ['Name:', 'Name'], labels: Uint8Array.of(1, 5),
+      },
+    } as MessageEvent)
+
+    await Promise.resolve()
+    expect(received[0]).toEqual(['Name:', 'Name'])
+    client.dispose()
+  })
+})
+
+describe('WorkerClient.ingestJson', () => {
+  it('sends the raw JSON string to the worker, unparsed', async () => {
+    const postMessage = vi.fn()
+    const worker = { postMessage, terminate: vi.fn() } as unknown as Worker
+    const client = new WorkerClient(worker)
+
+    const json = '{"form":[]}'
+    const pending = client.ingestJson(7, json, 100, 200)
+    const sent = postMessage.mock.calls.at(-1)![0] as { id: number; kind: string; pageIndex: number; json: string; offsetX: number; offsetY: number }
+
+    expect(sent.kind).toBe('ingestJson')
+    expect(sent.pageIndex).toBe(7)
+    // A string, not an object: parsing on this thread is the thing we avoid.
+    expect(sent.json).toBe(json)
+    expect(sent.offsetX).toBe(100)
+    expect(sent.offsetY).toBe(200)
+
+    worker.onmessage?.({ data: { id: sent.id, kind: 'ok' } } as MessageEvent)
+    await expect(pending).resolves.toBeUndefined()
+    client.dispose()
+  })
+
+  it('rejects when the worker reports a parse error', async () => {
+    const postMessage = vi.fn()
+    const worker = { postMessage, terminate: vi.fn() } as unknown as Worker
+    const client = new WorkerClient(worker)
+
+    const pending = client.ingestJson(7, '{bad', 0, 0)
+    const sent = postMessage.mock.calls.at(-1)![0] as { id: number }
+
+    worker.onmessage?.({ data: { id: sent.id, kind: 'error', message: 'bad json' } } as MessageEvent)
+    await expect(pending).rejects.toThrow('bad json')
     client.dispose()
   })
 })

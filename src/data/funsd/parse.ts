@@ -1,5 +1,6 @@
 import { NodeType } from '@/data/nodes'
-import type { SerializedNode } from '@/worker/protocol'
+import { TYPE_OF_LABEL as TYPE_OF_SEMANTIC_LABEL } from '@/data/labels'
+import { SemanticLabel, type SerializedNode } from '@/worker/protocol'
 
 export type FunsdWord = { box: [number, number, number, number]; text: string }
 export type FunsdEntity = {
@@ -18,12 +19,25 @@ export type FunsdForm = { form: FunsdEntity[] }
  */
 export const ID_STRIDE = 1000
 
-const TYPE_OF_LABEL: Record<FunsdEntity['label'], NodeType> = {
-  question: NodeType.KeyValue,
-  answer: NodeType.KeyValue,
-  header: NodeType.Paragraph,
-  other: NodeType.Paragraph,
+/** FUNSD's label string → our `SemanticLabel` — the single source of truth for that mapping. */
+const LABEL_OF: Record<FunsdEntity['label'], SemanticLabel> = {
+  question: SemanticLabel.Question,
+  answer: SemanticLabel.Answer,
+  header: SemanticLabel.Header,
+  other: SemanticLabel.Other,
 }
+
+/**
+ * FUNSD's label string → `NodeType`, derived from `labels.ts`'s
+ * label→`NodeType` table instead of a second literal copy that could drift
+ * out of sync with it.
+ */
+const TYPE_OF_LABEL: Record<FunsdEntity['label'], NodeType> = Object.fromEntries(
+  (Object.entries(LABEL_OF) as [FunsdEntity['label'], SemanticLabel][]).map(([k, v]) => [
+    k,
+    TYPE_OF_SEMANTIC_LABEL[v],
+  ]),
+) as Record<FunsdEntity['label'], NodeType>
 
 export type ParsedPage = { nodes: SerializedNode[]; edges: number[] }
 
@@ -58,6 +72,8 @@ export function parseFunsdPage(
       type: TYPE_OF_LABEL[entity.label] ?? NodeType.Paragraph,
       parent: -1,
       order: order++,
+      text: entity.text ?? '',
+      label: LABEL_OF[entity.label] ?? SemanticLabel.Other,
     })
     for (const word of entity.words ?? []) {
       const [wx0, wy0, wx1, wy1] = word.box
@@ -71,6 +87,8 @@ export function parseFunsdPage(
         type: NodeType.Line,
         parent: entityId,
         order: order++,
+        text: word.text ?? '',
+        label: SemanticLabel.Word,
       })
     }
   }

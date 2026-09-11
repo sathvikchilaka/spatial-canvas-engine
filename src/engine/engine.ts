@@ -1,12 +1,12 @@
 import { PAGE_GAP, PAGE_H, PAGE_W, PAGES_PER_ROW } from '@/data/generator'
-import { gridGeometry, type PageGeometry } from '@/data/geometry'
+import { geometryBounds, gridGeometry, type PageGeometry } from '@/data/geometry'
 import type { NodeArrays } from '@/data/nodes'
 import type { PageRenderFn } from '@/data/pageRenderer'
 import { BucketGrid } from './bucketGrid'
 import { crispOffset, sizeCanvas } from './canvas'
 import { BoxLayer } from './layers/boxes'
 import { PageLayer } from './layers/pages'
-import { visibleWorldRect, type Viewport } from './viewport'
+import { clampPan, visibleWorldRect, type Viewport } from './viewport'
 
 /**
  * Cull-result capacity. The cull truncates at this cap, so it must exceed the
@@ -44,9 +44,10 @@ export type FramePerf = {
  */
 export class CanvasEngine {
   private ctx: CanvasRenderingContext2D
-  private vp: Viewport = { scale: 0.35, tx: 40, ty: 20 }
+  private vp: Viewport = { scale: 1, tx: 0, ty: 0 }
   private nodes: NodeArrays | null = null
   private geometry: PageGeometry = gridGeometry(0, PAGE_W, PAGE_H, PAGE_GAP, PAGES_PER_ROW)
+  private bounds = { maxX: 0, maxY: 0 }
   private grid: BucketGrid = new BucketGrid()
   private readonly boxes = new BoxLayer(MAX_VISIBLE)
   /** Public so a document switch can swap the raster source without rebuilding the engine. */
@@ -110,7 +111,7 @@ export class CanvasEngine {
   }
 
   setViewport(vp: Viewport): void {
-    this.vp = vp
+    this.vp = clampPan(vp, this.bounds, this.cssW, this.cssH)
     this.requestDraw()
   }
 
@@ -121,8 +122,9 @@ export class CanvasEngine {
   setData(nodes: NodeArrays, grid: BucketGrid, geometry: PageGeometry): void {
     this.nodes = nodes
     this.geometry = geometry
+    this.bounds = geometryBounds(geometry)
     this.grid = grid
-    this.requestDraw()
+    this.setViewport(this.vp)
   }
 
   addOverlay(o: Overlay): () => void {
@@ -262,6 +264,6 @@ export class CanvasEngine {
     this.cssH = Math.max(1, rect.height)
     this.dpr = window.devicePixelRatio || 1
     sizeCanvas(this.canvas, this.cssW, this.cssH, this.dpr)
-    this.requestDraw()
+    this.setViewport(this.vp)
   }
 }

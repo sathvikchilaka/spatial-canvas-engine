@@ -1,7 +1,7 @@
 import { applyPatches, enablePatches, produce, produceWithPatches } from 'immer'
 import { create } from 'zustand'
 
-import type { Rect } from '@/data/nodes'
+import type { NodeType, Rect } from '@/data/nodes'
 import { History, HISTORY_LIMIT } from './history'
 
 enablePatches()
@@ -12,7 +12,14 @@ export { HISTORY_LIMIT }
 export type Edit = {
   rect?: Rect
   label?: string
+  /** Merged away or removed by the reviewer — rendered hidden, kept for undo. */
   deleted?: true
+  /**
+   * A node the reviewer created (a split table cell). The store is the only
+   * record of it, so its identity travels in the patch and redo can recreate
+   * it byte-for-byte.
+   */
+  created?: { page: number; type: NodeType; parent: number; order: number }
 }
 
 export type AppState = {
@@ -100,4 +107,12 @@ export function endCoalesce(): void {
 
 export function resetHistory(): void {
   history.clear()
+}
+
+/**
+ * Selection/hover are UI-only, never undoable, and must never invalidate the
+ * history of real edits (a click after a drag shouldn't wipe undo).
+ */
+export function setUiState(partial: Partial<Pick<AppState, 'selectedId' | 'hoveredId'>>): void {
+  runInternal(() => useStore.setState(partial))
 }

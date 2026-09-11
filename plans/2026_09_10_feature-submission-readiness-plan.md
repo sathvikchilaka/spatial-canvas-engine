@@ -623,7 +623,7 @@ Replace the placeholder comment on the **Live demo** line with the real URL. Add
 redistributed on the demo (non-commercial research licence), so run it locally per below.
 ```
 
-- [ ] **Step 3: Add CI**
+- [x] **Step 3: Add CI**
 
 ```yaml
 # .github/workflows/ci.yml

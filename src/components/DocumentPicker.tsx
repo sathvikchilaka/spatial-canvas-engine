@@ -1,8 +1,10 @@
+import { memo } from 'react'
+
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 export type DocumentId = 'funsd' | 'synthetic'
 
-export function DocumentPicker({
+export const DocumentPicker = memo(function DocumentPicker({
   value,
   onChange,
 }: {
@@ -20,4 +22,4 @@ export function DocumentPicker({
       </SelectContent>
     </Select>
   )
-}
+})

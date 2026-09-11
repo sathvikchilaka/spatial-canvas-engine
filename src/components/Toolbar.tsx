@@ -1,4 +1,5 @@
 import { MousePointer2, Table2, Workflow } from "lucide-react"
+import { memo } from "react"
 
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -11,7 +12,7 @@ const TOOLS: Array<{ name: ToolName; label: string; Icon: typeof MousePointer2 }
   { name: "table", label: "Table mesh (T)", Icon: Table2 },
 ]
 
-export function Toolbar({
+export const Toolbar = memo(function Toolbar({
   active,
   onChange,
 }: {
@@ -36,4 +37,4 @@ export function Toolbar({
       ))}
     </div>
   )
-}
+})

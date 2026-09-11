@@ -148,6 +148,13 @@ export type PickResult = {
   worker: { p50: number; p95: number; max: number; over2ms: number }
   /** End-to-end: pointerdown dispatch → store selection changed. */
   endToEnd: { p50: number; p95: number; max: number; over2ms: number } | null
+  /**
+   * Why `endToEnd` has the sample count it does. A null `endToEnd` used to be
+   * indistinguishable from a broken harness, which is exactly what it was:
+   * `onScreen: 0` says the candidates were never clickable, `timedOut` says the
+   * clicks landed but no selection followed.
+   */
+  e2e: { candidates: number; onScreen: number; timedOut: number; measured: number }
   hits: number
   nodes: number
 }
@@ -171,6 +178,9 @@ export async function benchPick(session: Session, samples = 200, endToEnd = true
   const workerMs: number[] = []
   const e2eMs: number[] = []
   let hits = 0
+  let e2eCandidates = 0
+  let e2eOnScreen = 0
+  let e2eTimedOut = 0
 
   const step = Math.max(1, Math.floor(nodes.count / samples))
 
@@ -187,15 +197,48 @@ export async function benchPick(session: Session, samples = 200, endToEnd = true
 
   if (endToEnd) {
     const { useStore } = await import('@/store/store')
-    for (let i = 0; i < nodes.count && e2eMs.length < Math.min(50, samples); i += step * 4) {
+    // Candidates come from the culled draw list, not from an index stride over
+    // the whole document. Striding by index and then filtering on "is it on
+    // screen" collected *zero* samples on the contact-sheet layout — at 0.35
+    // zoom none of those 50 particular nodes was in the viewport, so every
+    // candidate was skipped and `endToEnd` silently reported null. These are
+    // the nodes the draw loop just rendered, so they are on screen by
+    // construction.
+    const visible = engine.lastVisible
+    e2eCandidates = visible.count
+    const want = Math.min(50, samples)
+    const vStep = Math.max(1, Math.floor(visible.count / want))
+    for (let v = 0; v < visible.count && e2eMs.length < want; v += vStep) {
+      const i = visible.indices[v]
       const c = i * 4
-      const wx = nodes.coords[c] + nodes.coords[c + 2] / 2
-      const wy = nodes.coords[c + 1] + nodes.coords[c + 3] / 2
       const vp = engine.viewport
-      const sx = wx * vp.scale + vp.tx
-      const sy = wy * vp.scale + vp.ty
-      // Only measurable while the point is actually on screen.
-      if (sx < 0 || sy < 0 || sx > rect.width || sy > rect.height) continue
+      // Click the centre of the box's intersection with the canvas, not the
+      // box's own centre. The cull keeps boxes whose *bounds* overlap the
+      // viewport, so a box larger than the canvas or straddling its edge has
+      // an off-screen centre — on the stress document the first visible box is
+      // 1060x170 at scale 1, centred 92px above the canvas. Using the box
+      // centre discarded those samples (and made the same click miss entirely
+      // in the e2e suite); the intersection centre is inside the box and on
+      // screen by construction.
+      const x0 = Math.max(0, nodes.coords[c] * vp.scale + vp.tx)
+      const y0 = Math.max(0, nodes.coords[c + 1] * vp.scale + vp.ty)
+      const x1 = Math.min(rect.width, (nodes.coords[c] + nodes.coords[c + 2]) * vp.scale + vp.tx)
+      const y1 = Math.min(rect.height, (nodes.coords[c + 1] + nodes.coords[c + 3]) * vp.scale + vp.ty)
+      if (x1 <= x0 || y1 <= y0) continue
+      const sx = (x0 + x1) / 2
+      const sy = (y0 + y1) / 2
+      e2eOnScreen++
+
+      // Clear the selection first, or this measures the wrong gesture.
+      // `SelectTool.onPointerDown` hit-tests the *currently selected* rect
+      // before anything else and, on a hit, enters its drag phase and returns
+      // without ever calling `pick`. Sampling adjacent boxes means the next
+      // click often lands inside the box just selected, so it became a drag,
+      // no selection change followed, and the sample timed out — 16 of 53
+      // dropped that way, and the survivors skewed the percentiles.
+      if (useStore.getState().selectedId !== null) {
+        useStore.setState({ selectedId: null })
+      }
 
       const t0 = performance.now()
       const settled = new Promise<number>((resolve) => {
@@ -228,6 +271,7 @@ export async function benchPick(session: Session, samples = 200, endToEnd = true
       )
       const ms = await settled
       if (ms >= 0) e2eMs.push(ms)
+      else e2eTimedOut++
     }
   }
 
@@ -244,6 +288,12 @@ export async function benchPick(session: Session, samples = 200, endToEnd = true
     endToEnd: e.length
       ? { p50: pct(e, 0.5), p95: pct(e, 0.95), max: pct(e, 1), over2ms: e2eMs.filter((v) => v > 2).length }
       : null,
+    e2e: {
+      candidates: e2eCandidates,
+      onScreen: e2eOnScreen,
+      timedOut: e2eTimedOut,
+      measured: e2eMs.length,
+    },
     hits,
     nodes: nodes.count,
   }

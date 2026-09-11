@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react"
 
 import { benchPan, benchPick } from "@/app/bench"
 import { ingestReport, markStreamDone, startIngestProbe, stopIngestProbe } from "@/app/ingestProbe"
@@ -18,9 +18,19 @@ import { zoomAt } from "@/engine/viewport"
 import { canRedo, canUndo, redo, resetHistory, undo, useStore } from "@/store/store"
 import { SemanticLabel } from "@/worker/protocol"
 
+/**
+ * How long the structure tree may lag the stream. `buildTreeRows` is O(n log n)
+ * over the whole document, so it must not run once per ingested page.
+ */
+const TREE_REBUILD_MS = 400
+
 export function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const sessionRef = useRef<Session | null>(null)
+  const streamFrameRef = useRef<number | null>(null)
+  const treeTimerRef = useRef<number | null>(null)
+  const [treeVersion, setTreeVersion] = useState(0)
+  const [, startVersionTransition] = useTransition()
   const [nodes, setNodes] = useState<NodeArrays | null>(null)
   const [stats, setStats] = useState({ fps: 0, drawMs: 0, drawn: 0, zoom: 0.35 })
   const [stream, setStream] = useState({
@@ -48,6 +58,13 @@ export function App() {
     if (!engine) return
     const { w, h } = engine.size
     engine.setViewport(zoomAt(engine.viewport, w / 2, h / 2, factor))
+  }, [])
+  const handleToolChange = useCallback((t: ToolName) => {
+    setTool(t)
+    sessionRef.current?.setTool(t)
+  }, [])
+  const handleRelabel = useCallback((id: number, label: SemanticLabel) => {
+    sessionRef.current?.setLabel(id, label)
   }, [])
 
   useEffect(() => {
@@ -80,6 +97,12 @@ export function App() {
         w.__status = () => session.status
         // Read-only edit map, so the suite can assert undo/redo without reading the DOM.
         w.__edits = () => useStore.getState().edits
+        // Selection state. `__status()` does not carry it, so a test asserting
+        // "the click selected something" had no way to actually check.
+        w.__ui = () => {
+          const s = useStore.getState()
+          return { selectedId: s.selectedId, hoveredId: s.hoveredId }
+        }
       }
       setNodes(session.nodes)
 
@@ -110,9 +133,38 @@ export function App() {
           since = now
         }
       })
+      const bumpTree = () => {
+        treeTimerRef.current = null
+        // Low-priority: React may yield mid-render instead of blocking on the
+        // whole rebuild.
+        startVersionTransition(() => setTreeVersion(session.status.pagesReceived))
+      }
+
       void session.connectStream(() => {
         if (session.status.done) markStreamDone()
-        setStream({ ...session.status })
+        // Ingest fires this on nearly every drained chunk. Coalescing to one
+        // React commit per animation frame keeps status updates from forcing
+        // a re-render on every SSE tick. The status bar is cheap, so it may
+        // track the stream this closely.
+        if (streamFrameRef.current === null) {
+          streamFrameRef.current = requestAnimationFrame(() => {
+            streamFrameRef.current = null
+            setStream({ ...session.status })
+          })
+        }
+        // The tree is the expensive consumer: `buildTreeRows` sorts every node
+        // in the document, so bumping its version once per ingested page costs
+        // 199 full O(n log n) rebuilds over 41k nodes on FUNSD. Throttle it —
+        // a row count that trails the stream by a beat is the right trade for
+        // an unblocked main thread — but never skip the last page.
+        if (session.status.done) {
+          if (treeTimerRef.current !== null) clearTimeout(treeTimerRef.current)
+          bumpTree()
+          return
+        }
+        if (treeTimerRef.current === null) {
+          treeTimerRef.current = window.setTimeout(bumpTree, TREE_REBUILD_MS)
+        }
       })
     }
     void build()
@@ -147,6 +199,14 @@ export function App() {
       cancelled = true
       stopIngestProbe()
       offFrame?.()
+      if (streamFrameRef.current !== null) {
+        cancelAnimationFrame(streamFrameRef.current)
+        streamFrameRef.current = null
+      }
+      if (treeTimerRef.current !== null) {
+        clearTimeout(treeTimerRef.current)
+        treeTimerRef.current = null
+      }
       sessionRef.current?.dispose()
       sessionRef.current = null
       // The perf handles must never address a disposed session — null them
@@ -160,6 +220,7 @@ export function App() {
       w.__status = null
       w.__edits = null
       setNodes(null)
+      setTreeVersion(0)
       setStream({
         pagesReceived: 0,
         shielded: 0,
@@ -185,13 +246,7 @@ export function App() {
         </span>
         <div className="ml-auto flex items-center gap-2">
           <DocumentPicker value={docId} onChange={setDocId} />
-          <Toolbar
-            active={tool}
-            onChange={(t) => {
-              setTool(t)
-              sessionRef.current?.setTool(t)
-            }}
-          />
+          <Toolbar active={tool} onChange={handleToolChange} />
           <Button size="sm" variant="outline" disabled={!canUndo()} onClick={() => undo()}>
             Undo
           </Button>
@@ -205,10 +260,10 @@ export function App() {
           <ResizablePanel defaultSize="20" minSize="14" maxSize="35" className="bg-card">
             <TreeView
               nodes={nodes}
-              version={stream.pagesReceived}
+              version={treeVersion}
               onFocus={focusNode}
               meta={treeMeta}
-              onRelabel={(id, label) => sessionRef.current?.setLabel(id, label)}
+              onRelabel={handleRelabel}
             />
           </ResizablePanel>
           <ResizableHandle withHandle />
@@ -221,7 +276,7 @@ export function App() {
           <ResizablePanel defaultSize="25" minSize="18" maxSize="45" className="bg-card">
             <InspectorPanel
               nodes={nodes}
-              version={stream.pagesReceived}
+              version={treeVersion}
               meta={treeMeta}
               rectOf={rectOf}
               onFocus={focusNode}

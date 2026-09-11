@@ -88,9 +88,25 @@ let rafId = 0
 const tick = () => {
   const now = performance.now()
   const gap = now - lastTick
-  if (gap > 16.7 * 1.5 && gaps.length < MAX_SAMPLES) gaps.push(Math.round(gap * 100) / 100)
+  // A hidden or occluded tab stops receiving animation frames, so the gap
+  // across a backgrounded interval measures how long the user was looking
+  // elsewhere — tens of seconds — not how long the main thread was blocked.
+  // Recording it would make `worstFrameGap` meaningless in exactly the session
+  // where you are reading a DevTools trace in another window.
+  if (!document.hidden && gap > 16.7 * 1.5 && gaps.length < MAX_SAMPLES) {
+    gaps.push(Math.round(gap * 100) / 100)
+  }
   lastTick = now
   if (ticking) rafId = requestAnimationFrame(tick)
+}
+
+/**
+ * The first frame after a tab becomes visible again is an unbounded gap even
+ * though `document.hidden` is already false by then; rebasing the clock here
+ * discards it.
+ */
+const onVisibility = () => {
+  lastTick = performance.now()
 }
 
 /**
@@ -110,6 +126,7 @@ export function startIngestProbe(): void {
   // `gaps` must be cleared with the window it is reported against, or a remount
   // reports the previous run's stalls over a freshly-shortened interval.
   gaps.length = 0
+  document.addEventListener('visibilitychange', onVisibility)
   rafId = requestAnimationFrame(tick)
 }
 
@@ -143,6 +160,7 @@ export function ingestReport(): IngestReport & { frameGaps: number[]; worstFrame
 /** Stops the rAF loop and the observer — nothing here outlives the mount. */
 export function stopIngestProbe(): void {
   ticking = false
+  document.removeEventListener('visibilitychange', onVisibility)
   if (rafId) cancelAnimationFrame(rafId)
   rafId = 0
   observer?.disconnect()

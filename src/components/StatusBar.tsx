@@ -1,3 +1,5 @@
+import { memo } from "react"
+
 import { cn } from "@/lib/utils"
 
 type Props = {
@@ -12,7 +14,7 @@ type Props = {
   onZoomOut?: () => void
 }
 
-export function StatusBar({
+export const StatusBar = memo(function StatusBar({
   nodes,
   zoom,
   pagesReceived,
@@ -58,4 +60,4 @@ export function StatusBar({
       {failed > 0 && <span className="text-destructive">{failed} pages failed</span>}
     </footer>
   )
-}
+})

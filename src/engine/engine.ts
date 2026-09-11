@@ -251,19 +251,42 @@ export class CanvasEngine {
   }
 
   private observeSize() {
-    this.ro = new ResizeObserver(() => this.resize())
+    this.ro = new ResizeObserver((entries) => {
+      // The entry already carries the measured box. Calling
+      // `getBoundingClientRect` here instead would force a synchronous layout
+      // flush inside the callback — the reflow the DevTools "Forced reflow"
+      // insight flags, and the single largest main-thread stall in the app.
+      const box = entries[entries.length - 1]?.borderBoxSize?.[0]
+      if (box) this.resize(box.inlineSize, box.blockSize)
+      else this.resize() // Older Safari: no borderBoxSize, fall back to measuring.
+    })
     this.ro.observe(this.canvas.parentElement ?? this.canvas)
     this.watchDpr()
     this.resize()
   }
 
-  private resize() {
-    const host = this.canvas.parentElement ?? this.canvas
-    const rect = host.getBoundingClientRect()
-    this.cssW = Math.max(1, rect.width)
-    this.cssH = Math.max(1, rect.height)
-    this.dpr = window.devicePixelRatio || 1
-    sizeCanvas(this.canvas, this.cssW, this.cssH, this.dpr)
+  /**
+   * `w`/`h` come from the ResizeObserver entry when there is one; measuring is
+   * only for the paths that have no entry to read (first call, dpr change).
+   */
+  private resize(w?: number, h?: number) {
+    if (w === undefined || h === undefined) {
+      const host = this.canvas.parentElement ?? this.canvas
+      const rect = host.getBoundingClientRect()
+      w = rect.width
+      h = rect.height
+    }
+    const cssW = Math.max(1, w)
+    const cssH = Math.max(1, h)
+    const dpr = window.devicePixelRatio || 1
+    // A ResizeObserver fires for changes that leave the box identical (a
+    // reflow elsewhere, a style write of the same value). Bailing here keeps
+    // those from clearing the canvas and re-clamping the viewport.
+    if (cssW === this.cssW && cssH === this.cssH && dpr === this.dpr) return
+    this.cssW = cssW
+    this.cssH = cssH
+    this.dpr = dpr
+    sizeCanvas(this.canvas, cssW, cssH, dpr)
     this.setViewport(this.vp)
   }
 }

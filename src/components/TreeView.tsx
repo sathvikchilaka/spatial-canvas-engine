@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -131,7 +131,13 @@ type Props = {
  * Hand-virtualized: 10k rows of DOM would reintroduce the very bottleneck the
  * canvas exists to avoid.
  */
-export function TreeView({ nodes, version, onFocus, meta, onRelabel }: Props) {
+export const TreeView = memo(function TreeView({
+  nodes,
+  version,
+  onFocus,
+  meta,
+  onRelabel,
+}: Props) {
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set())
   const [scrollTop, setScrollTop] = useState(0)
   const [height, setHeight] = useState(600)
@@ -149,7 +155,13 @@ export function TreeView({ nodes, version, onFocus, meta, onRelabel }: Props) {
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return
-    const ro = new ResizeObserver(() => setHeight(el.clientHeight))
+    // Read the height off the entry, not `clientHeight`: a layout read inside
+    // the callback flushes pending layout, and this observer shares a delivery
+    // batch with the canvas engine's.
+    const ro = new ResizeObserver((entries) => {
+      const box = entries[entries.length - 1]?.borderBoxSize?.[0]
+      setHeight(box ? box.blockSize : el.clientHeight)
+    })
     ro.observe(el)
     setHeight(el.clientHeight)
     return () => ro.disconnect()
@@ -295,4 +307,4 @@ export function TreeView({ nodes, version, onFocus, meta, onRelabel }: Props) {
       ) : null}
     </aside>
   )
-}
+})

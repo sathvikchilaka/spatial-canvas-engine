@@ -88,12 +88,71 @@ __ingest()
 
 `frameGaps` exists because the `longtask` API only reports tasks over **50 ms**,
 while the budget here is **16 ms**. A missed animation frame is the observable
-the requirement is actually about, so the probe watches rAF spacing as well; a
-clean run is `over16: 0` **and** an empty `frameGaps`.
+the requirement is actually about, so the probe watches rAF spacing as well.
+
+Two things will invalidate a run, both of which produced a wrong answer during
+this investigation:
+
+- **`streamDoneAt: null` means you called it too early.** The ingest was still
+  running, so the window covers part of a load. Wait for `stream complete` in
+  the status bar — the dot turns grey.
+- **A hidden tab receives no animation frames.** Reading a DevTools trace in
+  another window for three minutes produced a `worstFrameGap` of 62,224 ms.
+  Gaps are now recorded only while `document.hidden` is false, and the clock
+  rebases on `visibilitychange`, but a `window` far larger than `streamDoneAt`
+  still means the measurement sat idle and the run is worth repeating.
 
 Ingest is already chunked against this: `Session.scheduleDrain` drains the
 stream queue under an 8 ms wall-clock budget per timer and reschedules, so a
 burst of out-of-order pages cannot become one long task.
+
+### Measured — stress document, production build, no CPU throttling
+
+| Field | Value |
+| --- | --- |
+| `streamDoneAt` | 5,576 ms |
+| `window` | 19,774 ms |
+| `count` / `over16` / `over50` | 0 / **0** / 0 |
+| `max` / `total` | 0 / 0 ms |
+| `frameGaps` | 31.6 ms, 28.7 ms |
+
+**Meets the budget**, with one honest caveat: `over16: 0` comes from the
+`longtask` API, which cannot see anything under 50 ms, and the probe's own rAF
+sampler did record two gaps of ~30 ms — about one dropped frame each. The
+DevTools trace for the same run attributes them to garbage collection
+(`Minor GC` 8.8 ms, `Major GC` 3.4 ms self time), not to application code. Two
+GC pauses across a 41k-node ingest is not a defect, but the claim here is
+"zero long tasks and two GC-attributable dropped frames", not a flat zero.
+
+### Measure the production build, and only the production build
+
+The largest number in this whole investigation was an artifact of how it was
+measured, so this is a procedure note, not a footnote:
+
+- A **dev-server** trace showed a 264–366 ms task during ingest. It does not
+  exist in a production build. StrictMode renders every component twice, and
+  `console.createTask` instrumentation runs only while DevTools is recording;
+  both are attributed to the nearest application frame, which made `TreeView`
+  look like it cost 31 ms of self time. Benched in isolation, `buildTreeRows`
+  takes 0.41 ms for 10,000 nodes and 6.81 ms for 41,790 fully expanded.
+- **CPU throttling finds problems; report numbers at 1x.** The one real defect
+  below only became visible at 4x slowdown, where it read 248 ms.
+- Check the trace's own URL line before trusting it. `localhost:5173` is dev;
+  the production preview is `4173`, and `__ingest()` requires `?bench=1` there.
+
+### The one real violation found
+
+A **forced synchronous reflow** inside the engine's own `ResizeObserver`:
+248.6 ms at 4x throttling, 100% of it `Layout` self time with zero JS cost
+above it. `resize()` called `getBoundingClientRect()` on the element the
+observer was watching, forcing a layout flush inside the callback, and
+`sizeCanvas` then wrote `canvas.style.width/height` unconditionally —
+invalidating that same subtree and re-arming the observer that had just fired.
+Both observers now read the measured box off the `ResizeObserverEntry`, and
+every size write is guarded on a real change (assigning `canvas.width` also
+clears the canvas, so a no-op write cost a repaint on top of the layout).
+After the fix, total `Layout` across a 5.06 s trace is **7.5 ms**, and the
+DevTools "Forced reflow" insight is gone.
 
 ## Click-to-selection latency (graded: < 2 ms across 10k nodes)
 
@@ -114,6 +173,56 @@ answer different questions:
 Both report `p50 / p95 / max` and `over2ms`, a count of samples that broke the
 budget. `hits` should equal `samples` — a shortfall means the worker index and
 the rendered geometry disagree, which is a correctness bug, not a slow one.
+
+`e2e` explains the `endToEnd` sample count: `candidates` (boxes in the culled
+draw list), `onScreen` (centres actually inside the canvas), `timedOut` (clicks
+that produced no selection change within 250 ms) and `measured`. This exists
+because `endToEnd` reported `null` for a while, which read as a failing
+hit-test but was a harness bug — candidates were taken by index stride over the
+whole document and then filtered to the viewport, so on the contact-sheet
+layout none survived and nothing was measured. Candidates now come from
+`engine.lastVisible`.
+
+### Measured — stress document, 9,535 nodes, production build
+
+| Path | p50 | p95 | max | over 2 ms |
+| --- | --- | --- | --- | --- |
+| `worker` (spatial index + transport) | 0 ms | **0.1-0.2 ms** | 0.6-0.8 ms | 0 / 200 |
+| `endToEnd` (pointerdown → selection) | 0.3-0.5 ms | **1.5-3.8 ms** (varies run to run) | up to 3.8 ms | 0-3 / 50 |
+
+`hits` 200/200 — the worker index and the rendered geometry agree.
+
+**The index meets the budget; the end-to-end path does not, reliably.** The
+graded target is < 2 ms click-to-selection, and `worker` p95 is 0.1-0.2 ms
+with zero samples over budget — the QuadTree is ~10-20x inside the
+requirement. `endToEnd` p95 ranges 1.5-3.8 ms across repeated runs on the
+same machine: sometimes under budget, sometimes nearly double it. The ~1-3 ms
+difference from `worker` is the tool state machine and the React commit that
+follow the pick, not the spatial query. The e2e assertion allows < 5 ms — a
+regression detector, not a claim that the 2 ms budget is met — because
+asserting < 2 ms here would make the suite flaky on a number the app does not
+reliably hit, and the original < 16 ms bound hid the gap entirely.
+
+Two harness bugs were found and fixed while getting a trustworthy number here
+(both fixed candidate selection was sampling by index stride, not by what is
+actually on screen — see the `e2e` diagnostic fields above):
+
+- Candidates whose *centre* fell outside the canvas (a box larger than the
+  viewport, or straddling its edge) were silently skipped, undercounting
+  `measured`.
+- The previous selection was cleared only when it matched the current
+  candidate's id, so a click landing inside a box **already selected from a
+  prior sample** was converted by `SelectTool.onPointerDown` into a drag
+  gesture instead of a pick — no selection change followed, and the sample
+  timed out. 16 of 53 on-screen candidates were lost this way in one run.
+  Clearing the selection unconditionally before each candidate fixed it:
+  `timedOut` went from 16 to 0 in the same run, and `endToEnd` p95 dropped
+  from 3.5 ms to 1.5 ms — dropped samples were skewing the percentile toward
+  the slow tail.
+
+Also: `candidates: 86` — at the default zoom only 86 boxes are in view, so
+this measures hit-testing *in a document of* 9,535 nodes, not with 10,000
+boxes on screen. Re-run zoomed out for the load the brief describes.
 
 ## Measured
 

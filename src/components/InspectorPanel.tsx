@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { memo, useMemo } from "react"
 
 import type { NodeArrays, Rect } from "@/data/nodes"
 import { cn } from "@/lib/utils"
@@ -32,7 +32,13 @@ type Props = {
  * row here selects it via `setUiState`, and the row matching `selectedId` is
  * highlighted, mirroring `TreeView.tsx`'s row pattern.
  */
-export function InspectorPanel({ nodes, version, meta, rectOf, onFocus }: Props) {
+export const InspectorPanel = memo(function InspectorPanel({
+  nodes,
+  version,
+  meta,
+  rectOf,
+  onFocus,
+}: Props) {
   const selectedId = useStore((s) => s.selectedId)
   const edits = useStore((s) => s.edits)
 
@@ -95,7 +101,7 @@ export function InspectorPanel({ nodes, version, meta, rectOf, onFocus }: Props)
       </TabsContent>
     </Tabs>
   )
-}
+})
 
 /**
  * Renders one flattened subtree as clickable, individually-addressable rows.
